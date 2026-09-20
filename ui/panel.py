@@ -1,15 +1,12 @@
 """v2 主面板。
 
-- 顶部:聚合行 (总额度 USD / 进度 / 状态)
-- 中部:provider 行 (每行带 hover / 复制 / 右键菜单)
+- provider 行 (每行带 hover / 复制 / 右键菜单)
 - 底部:状态栏 (下次刷新倒计时)
 - 交互:拖拽带边缘磁吸,光标反馈,快捷键 (F5/Esc/Ctrl+Q)
 """
 
 import time
 import tkinter as tk
-
-from providers.aggregate import compute as aggregate_compute
 
 FONT = "Microsoft YaHei UI"
 
@@ -88,7 +85,6 @@ class Panel:
         self._rows = {}
         self._last_paint = {}
         self._last_results = []
-        self._agg_state = {}
 
         root.title("AgentEye")
         root.overrideredirect(True)
@@ -97,7 +93,6 @@ class Panel:
         self._place_initial()
 
         self._build_header()
-        self._build_aggregate_row()
         self.rows_frame = tk.Frame(root, bg=C["bg"])
         self.rows_frame.pack(fill="x", padx=10)
         self.footer = tk.Label(
@@ -149,24 +144,6 @@ class Panel:
         add_btn.bind("<Enter>", lambda e: add_btn.config(fg=C["ok"]))
         add_btn.bind("<Leave>", lambda e: add_btn.config(fg=C["dim"]))
 
-    def _build_aggregate_row(self):
-        self.agg_frame = tk.Frame(self.root, bg=C["card"], cursor="hand2")
-        self.agg_frame.pack(fill="x", padx=10, pady=(4, 4))
-        self.agg_label = tk.Label(self.agg_frame, text="聚合加载中 …",
-                                  font=(FONT, 9, "bold"), fg=C["dim"],
-                                  bg=C["card"], anchor="w")
-        self.agg_label.pack(side="left", padx=10, pady=8)
-        self.agg_value = tk.Label(self.agg_frame, text="",
-                                  font=(FONT, 9, "bold"), fg=C["dim"],
-                                  bg=C["card"])
-        self.agg_value.pack(side="right", padx=10, pady=8)
-        self.agg_frame.bind("<Button-1>", lambda e: self._show_aggregate_detail())
-        self.agg_label.bind("<Button-1>", lambda e: self._show_aggregate_detail())
-        self.agg_value.bind("<Button-1>", lambda e: self._show_aggregate_detail())
-        for w in (self.agg_frame, self.agg_label, self.agg_value):
-            w.bind("<Enter>", lambda e, ww=w: ww.config(bg=C["card_hover"]))
-            w.bind("<Leave>", lambda e, ww=w: ww.config(bg=C["card"]))
-
     def _build_menu(self):
         m = tk.Menu(self.root, tearoff=0)
         m.add_command(label="立即刷新", command=self.actions["refresh_now"])
@@ -216,12 +193,6 @@ class Panel:
         self.actions["save_position"](
             self.root.winfo_x(), self.root.winfo_y())
 
-    def _show_aggregate_detail(self):
-        if not self._agg_state.get("providers_with_data"):
-            return
-        from ui.aggregate_detail import AggregateDetail
-        AggregateDetail(self.root, self._agg_state)
-
     def _close_any_popup(self):
         for w in self.root.winfo_children():
             if isinstance(w, tk.Toplevel):
@@ -263,10 +234,6 @@ class Panel:
             if widgets:
                 self._paint_row(widgets, r)
 
-        agg = aggregate_compute(results, self.cfg)
-        self._agg_state = agg
-        self._paint_aggregate(agg)
-
         levels = [r.get("level") for r in results]
         if self.state.paused:
             self.dot.config(fg=C["off"])
@@ -288,27 +255,6 @@ class Panel:
         else:
             text = "等待首次刷新…"
         self.footer.config(text=text)
-
-    def _paint_aggregate(self, agg):
-        if not agg.get("enabled"):
-            self.agg_label.config(text="聚合已禁用", fg=C["dim"])
-            self.agg_value.config(text="", fg=C["dim"])
-            return
-        if agg["providers_with_data"] == 0:
-            self.agg_label.config(text="总额度 (无数据)", fg=C["dim"])
-            self.agg_value.config(text="—", fg=C["dim"])
-            return
-        color = LEVEL_COLOR.get(agg["level"], C["dim"])
-        self.agg_label.config(fg=color)
-        self.agg_value.config(fg=color)
-        line = f"总额度  ${agg['total_usd']:.2f}"
-        if agg["total_budget_usd"] > 0 and agg.get("pct") is not None:
-            line += f"  /  ${agg['total_budget_usd']:.0f}"
-        self.agg_label.config(text=line)
-        suffix = ""
-        if agg.get("pct") is not None and agg["total_budget_usd"] > 0:
-            suffix = f" ({agg['pct']:.0f}%)"
-        self.agg_value.config(text=f"{agg['level']}{suffix}")
 
     def _rebuild(self, results):
         for child in self.rows_frame.winfo_children():
