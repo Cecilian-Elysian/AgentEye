@@ -1,6 +1,8 @@
 """Add Key 对话框:粘贴 key → 自动探测 → 预览 → 保存。
 
 流程:
+  0. 顶部一行 5 个 provider 预设按钮 (MiniMax/DeepSeek/智谱/OpenCode/中转站),
+     点击自动填默认 base_url 和名称占位
   1. 用户输入 base_url (可选) 和 api_key
   2. FocusOut 触发 detect + 通用探测(超时 8s)
   3. 预览区显示识别结果 + 模型数 + 余额快照
@@ -16,12 +18,21 @@ from tkinter import ttk
 from providers import detect as detect_mod
 
 
+PRESETS = [
+    ("MiniMax",    "minimax",     "https://api.minimaxi.com"),
+    ("DeepSeek",   "deepseek",    "https://api.deepseek.com"),
+    ("智谱 GLM",   "zhipu",       "https://open.bigmodel.cn"),
+    ("OpenCode",   "opencode_go", "https://opencode.ai"),
+    ("中转站",     "relay",       ""),
+]
+
+
 class AddKeyDialog(tk.Toplevel):
     PROBE_TIMEOUT = 8.0
 
-    def __init__(self, parent, on_save, generic_probe=None):
+    def __init__(self, parent, on_save, generic_probe=None, current_count=0):
         super().__init__(parent)
-        self.title("添加 Key")
+        self.title(f"添加 Key  ·  当前已配置 {current_count} 个")
         self.configure(bg="#1d1d2b")
         self.resizable(False, False)
         self.transient(parent)
@@ -45,57 +56,81 @@ class AddKeyDialog(tk.Toplevel):
         FG = "#e8e8f0"
         DIM = "#8b8b9e"
         FONT = ("Microsoft YaHei UI", 10)
+        FONT_S = ("Microsoft YaHei UI", 9)
 
         body = tk.Frame(self, bg=BG)
         body.pack(fill="both", expand=True, padx=14, pady=12)
 
+        tk.Label(body, text="快速选择", bg=BG, fg=DIM, font=FONT).grid(
+            row=0, column=0, sticky="w", pady=(2, 4))
+        preset_frame = tk.Frame(body, bg=BG)
+        preset_frame.grid(row=0, column=1, columnspan=2, sticky="w", pady=(2, 4))
+        for i, (label, kind, url) in enumerate(PRESETS):
+            b = tk.Label(preset_frame, text=label, font=FONT_S,
+                         bg="#2a2a3a", fg=FG, padx=10, pady=4, cursor="hand2")
+            b.grid(row=0, column=i, padx=(0, 6))
+            b.bind("<Button-1>",
+                   lambda e, k=kind, u=url, lbl=label: self._apply_preset(k, u, lbl))
+            b.bind("<Enter>", lambda e, w=b: w.config(bg="#3a3a4a"))
+            b.bind("<Leave>", lambda e, w=b: w.config(bg="#2a2a3a"))
+
         tk.Label(body, text="Base URL (可选)", bg=BG, fg=DIM, font=FONT).grid(
-            row=0, column=0, sticky="w", **PAD)
+            row=1, column=0, sticky="w", **PAD)
         self.url_var = tk.StringVar()
         self.url_entry = tk.Entry(body, textvariable=self.url_var, width=44,
                                   bg="#15151d", fg=FG, insertbackground=FG,
                                   font=FONT, relief="flat")
-        self.url_entry.grid(row=0, column=1, sticky="ew", **PAD)
-        self.url_entry.bind("<FocusOut>", lambda e: self._schedule_probe())
+        self.url_entry.grid(row=1, column=1, sticky="ew", **PAD)
+        self.url_entry.insert(0, "")
+        self.url_entry.config(foreground=DIM)
+        self._url_placeholder = False
+        self.url_entry.bind("<FocusIn>", self._url_focus_in)
+        self.url_entry.bind("<FocusOut>", self._url_focus_out)
+        self.url_entry.bind("<FocusOut>", lambda e: self._schedule_probe(), add="+")
 
         tk.Label(body, text="API Key", bg=BG, fg=FG, font=FONT).grid(
-            row=1, column=0, sticky="w", **PAD)
+            row=2, column=0, sticky="w", **PAD)
         self.key_var = tk.StringVar()
         self.key_entry = tk.Entry(body, textvariable=self.key_var, width=44,
-                                  show="•", bg="#15151d", fg=FG,
+                                  bg="#15151d", fg=FG,
                                   insertbackground=FG, font=FONT, relief="flat")
-        self.key_entry.grid(row=1, column=1, sticky="ew", **PAD)
-        self.key_entry.bind("<FocusOut>", lambda e: self._schedule_probe())
+        self.key_entry.grid(row=2, column=1, sticky="ew", **PAD)
+        self.key_entry.insert(0, "sk-... 粘贴 key")
+        self.key_entry.config(foreground=DIM)
+        self._key_placeholder = True
+        self.key_entry.bind("<FocusIn>", self._key_focus_in)
+        self.key_entry.bind("<FocusOut>", self._key_focus_out)
+        self.key_entry.bind("<FocusOut>", lambda e: self._schedule_probe(), add="+")
         self.key_entry.bind("<KeyRelease>", lambda e: self._schedule_probe(delay=0.6))
 
         self.detect_btn = tk.Button(body, text="探测", command=self._probe_now,
                                     bg="#2a2a3a", fg=FG, relief="flat",
                                     activebackground="#3a3a4a", font=FONT)
-        self.detect_btn.grid(row=0, column=2, rowspan=2, sticky="ns", padx=8)
+        self.detect_btn.grid(row=1, column=2, rowspan=2, sticky="ns", padx=8)
 
         sep = tk.Frame(body, height=1, bg="#3a3a4a")
-        sep.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(8, 4))
+        sep.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 4))
 
         tk.Label(body, text="识别结果", bg=BG, fg=DIM, font=FONT).grid(
-            row=3, column=0, sticky="nw", **PAD)
+            row=4, column=0, sticky="nw", **PAD)
         self.preview = tk.Text(body, height=8, width=50, bg="#15151d", fg=FG,
-                               font=("Microsoft YaHei UI", 9), relief="flat",
+                               font=FONT_S, relief="flat",
                                wrap="word", state="disabled")
-        self.preview.grid(row=3, column=1, columnspan=2, sticky="ew", **PAD)
+        self.preview.grid(row=4, column=1, columnspan=2, sticky="ew", **PAD)
 
         tk.Label(body, text="显示名称", bg=BG, fg=FG, font=FONT).grid(
-            row=4, column=0, sticky="w", **PAD)
+            row=5, column=0, sticky="w", **PAD)
         self.name_var = tk.StringVar()
         tk.Entry(body, textvariable=self.name_var, width=44,
                  bg="#15151d", fg=FG, insertbackground=FG,
-                 font=FONT, relief="flat").grid(row=4, column=1, columnspan=2,
+                 font=FONT, relief="flat").grid(row=5, column=1, columnspan=2,
                                                 sticky="ew", **PAD)
 
         sep2 = tk.Frame(body, height=1, bg="#3a3a4a")
-        sep2.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(8, 4))
+        sep2.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(8, 4))
 
         btn_frame = tk.Frame(body, bg=BG)
-        btn_frame.grid(row=6, column=0, columnspan=3, sticky="e", pady=(4, 0))
+        btn_frame.grid(row=7, column=0, columnspan=3, sticky="e", pady=(4, 0))
         tk.Button(btn_frame, text="取消", command=self.destroy,
                   bg="#2a2a3a", fg=FG, relief="flat", font=FONT,
                   width=10).pack(side="right", padx=(8, 0))
@@ -107,10 +142,45 @@ class AddKeyDialog(tk.Toplevel):
         body.columnconfigure(1, weight=1)
         self._set_preview("等待输入 key …")
 
+    def _url_focus_in(self, e):
+        if self._url_placeholder:
+            self.url_entry.delete(0, "end")
+            self.url_entry.config(foreground="#e8e8f0")
+            self._url_placeholder = False
+
+    def _url_focus_out(self, e):
+        if not self.url_var.get().strip():
+            self.url_entry.delete(0, "end")
+            self.url_entry.insert(0, "中转站可留空,其他建议填默认")
+            self.url_entry.config(foreground="#8b8b9e")
+            self._url_placeholder = True
+
+    def _key_focus_in(self, e):
+        if self._key_placeholder:
+            self.key_entry.delete(0, "end")
+            self.key_entry.config(foreground="#e8e8f0", show="•")
+            self._key_placeholder = False
+
+    def _key_focus_out(self, e):
+        if not self.key_var.get().strip():
+            self.key_entry.delete(0, "end")
+            self.key_entry.insert(0, "sk-... 粘贴 key")
+            self.key_entry.config(foreground="#8b8b9e", show="")
+            self._key_placeholder = True
+
+    def _apply_preset(self, kind, url, label):
+        if self._url_placeholder:
+            self._url_focus_out(None)
+        self.url_var.set(url)
+        self._url_placeholder = False
+        self.url_entry.config(foreground="#e8e8f0")
+        if not self.name_var.get().strip():
+            self.name_var.set(label)
+        self.key_entry.focus_set()
+
     def _bind_shortcuts(self):
         self.bind("<Escape>", lambda e: self.destroy())
         self.bind("<Return>", lambda e: self._save() if self.save_btn["state"] == "normal" else None)
-        self.url_entry.focus_set()
 
     def _set_preview(self, text):
         self.preview.config(state="normal")
@@ -126,8 +196,12 @@ class AddKeyDialog(tk.Toplevel):
     def _probe_now(self):
         if self._probe_thread and self._probe_thread.is_alive():
             return
+        if self._key_placeholder:
+            self._set_preview("等待输入 key …")
+            self.save_btn.config(state="disabled")
+            return
         key = self.key_var.get().strip()
-        url = self.url_var.get().strip()
+        url = "" if self._url_placeholder else self.url_var.get().strip()
         if not key:
             self._set_preview("等待输入 key …")
             self.save_btn.config(state="disabled")
@@ -144,6 +218,13 @@ class AddKeyDialog(tk.Toplevel):
         detected = detect_mod.detect(key, url)
         probe_result = None
         if detected["kind"] == "generic_openai" and detected["base_url"]:
+            try:
+                probe_result = self.generic_probe(detected["base_url"], key,
+                                                  timeout=self.PROBE_TIMEOUT)
+            except Exception as e:
+                probe_result = {"error": str(e)}
+        elif detected["kind"] in ("minimax", "deepseek", "zhipu", "opencode_go",
+                                  "generic_openai") and detected["base_url"]:
             try:
                 probe_result = self.generic_probe(detected["base_url"], key,
                                                   timeout=self.PROBE_TIMEOUT)
@@ -191,8 +272,10 @@ class AddKeyDialog(tk.Toplevel):
             self.save_btn.config(state="disabled")
 
     def _save(self):
+        if self._key_placeholder:
+            return
         key = self.key_var.get().strip()
-        url = self.url_var.get().strip()
+        url = "" if self._url_placeholder else self.url_var.get().strip()
         name = self.name_var.get().strip() or "未命名"
         if not key:
             return

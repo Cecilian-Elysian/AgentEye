@@ -172,8 +172,14 @@ def build_actions(root, cfg, state, stop, wake):
             }
             cfg.setdefault("providers", []).append(new_provider)
             config_mod.save_v2(cfg)
+            try:
+                import notify as notify_mod
+                notify_mod.alert("AgentEye", f"已添加:{new_provider['name']}")
+            except Exception:
+                pass
             wake.set()
-        AddKeyDialog(root, on_save=_on_save)
+        count = len(cfg.get("providers") or [])
+        AddKeyDialog(root, on_save=_on_save, current_count=count)
 
     def probe_model(model_id, base_url, key, timeout=10.0):
         """1-token 试调:返回 (ok, latency_ms, error) 三元组。"""
