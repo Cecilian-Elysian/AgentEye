@@ -6,12 +6,18 @@
 ## v2 新特性
 
 - **粘贴 key 即用**:Add Key 对话框自动识别 provider(OpenAI 兼容 / 元序等中转 / MiniMax / OpenCode Go / DeepSeek / 智谱)
+- **5 个一键预设**:Add Key 顶部 5 个按钮(MiniMax / DeepSeek / 智谱 / OpenCode / 中转站),点一下自动填默认 URL 和名称
+- **金额/额度双视图**:金额行($ ¥ 额度)无进度条 + 💰 前缀 + 暖色底;百分比行带渐变进度条
+- **消耗渐变色**:绿→黄→红三色插值,基于 used_today/total 计算消耗比,detail 中所有金额/百分比同步上色
+- **窗口可拖拽 resize**:右下角 grip 调整面板大小(280×180 ~ 800×900),实时自适应 wraplength
+- **主面板 + 模型面板 拖拽重排**:长按 >5px 触发,红线指示器,顺序持久化到 cfg 和 cache
+- **窗口固定按钮**:Header 📌/📍 切换 topmost,状态持久化
+- **设置界面**:Header ⚙ 打开,改刷新间隔、告警/临界阈值(双币种独立)、月度预算、汇率
 - **模型列表自动拉取**:每个 provider 显示 `/v1/models` 列表,按能力分组(Claude/GPT/Gemini/...),支持搜索
 - **1-token 试调**:点击"试调"发送 1 token 请求,显示延迟,记录到 `~/.agenteye/cache/probe.jsonl`
-- **总额度聚合**:顶部固定行,USD 归一化所有 provider,显示总额度 + 预算进度
-- **聚合明细弹窗**:点击聚合行查看按贡献度排序的明细表
+- **金额今日已用/总额**:中转站显示 `今日 $X.XX / $Y.YY`,百分比行继续显示 5h%/周%/倒计时
 - **价格计算器**:模型详情面板估算 N 次调用的花费(常见模型公开价表)
-- **交互优化**:行 hover 高亮、点击数值复制、边缘磁吸、F5/Ctrl+Q/Esc 快捷键、首启欢迎 toast
+- **交互优化**:行 hover 高亮、点击数值复制(无移动)、边缘磁吸、F5/Ctrl+Q/Esc 快捷键、首启欢迎 toast
 - **通知合并**:同一 tick 内多条告警合并为一条 toast(避免刷屏)
 - **v1 自动迁移**:旧的 5 分立数组配置自动升级为统一 `providers[]`,备份为 `config.json.v1.bak`
 
@@ -34,7 +40,7 @@
     "monthly_budget_usd": 100.0,
     "currency_rate_cny_per_usd": 7.2
   },
-  "ui": {"x": null, "y": null},
+  "ui": {"x": null, "y": null, "width": 360, "height": 360, "order": [], "pinned": true},
   "providers": [
     {"id": "abc123", "kind": "minimax", "name": "MiniMax M3",
      "key": "sk-cp-...", "base_url": "https://api.minimaxi.com",
@@ -72,11 +78,14 @@ python main.py   前台运行便于看报错
 ## 窗口操作
 
 - **拖动**:按住任意位置拖,自动边缘磁吸(< 20px 贴边)
+- **拖拽重排行**:按住行任何位置超过 5px 进入拖拽模式,出现红色指示线,松开释放
+- **调整大小**:右下角 grip(`size_nw_se` 光标)拖动改变面板大小,内部自适应
 - **光标**:拖动时 `fleur`,行 hover `hand2`,× 按钮 hover 变红,+ 按钮 hover 变绿
-- **点击数值**:复制到剪贴板
+- **点击数值**:无移动 → 复制到剪贴板;有移动 → 拖拽重排
 - **右键行**:刷新此行 / 查看模型 / 试调 / 编辑 / 暂停 / 复制 key / 复制 URL / 删除
 - **点击 + 按钮**:打开 Add Key 对话框
-- **点击聚合行**:打开总额度明细弹窗
+- **点击 📌 按钮**:切换窗口固定(topmost),📌 = 固定,📍 = 不固定
+- **点击 ⚙ 按钮**:打开设置界面(刷新间隔 / 告警阈值 / 月度预算 / 汇率)
 - **右键菜单**:立即刷新 / 通知测试 / 添加 Key / 暂停 / 打开配置 / 退出
 - **键盘**: F5 刷新, Ctrl+Q 退出, Esc 关闭弹窗, 窗口聚焦时自动刷新
 
@@ -86,6 +95,13 @@ python main.py   前台运行便于看报错
 - 黄 = 低于预警(warn)
 - 红 = 低于告急或查询失败(critical / error)
 - 灰 = 未配置(unconfigured)
+
+**渐变插值**:`_usage_ratio` 返回 0..1,绿(#53d77a) → 黄(#f0c24b) → 红(#ff5d5d)
+三段线性插值;金额行主值和 detail 中所有 `$X`/`¥X`/`X%` 段统一上色。
+
+**行类型**:
+- 金额行(unit ∈ {$, ¥, 额度, 元, ￥}): 无底部进度条,💰 前缀,微调暖色底 #1d1b25
+- 百分比行: 保留 5px 渐变 canvas 进度条,normal card 底
 
 ## 缓存与日志
 
@@ -100,7 +116,7 @@ python main.py   前台运行便于看报错
 python -m unittest discover tests
 ```
 
-当前 60+ 测试用例覆盖 detect / generic / cache / migration / aggregate。
+当前 111 测试用例覆盖 detect / generic / cache / migration / aggregate / panel 渐变 / 金额行模式 / 拖拽重排 / 设置校验 / AddKey placeholder。
 
 ## 已知边界
 
@@ -114,18 +130,19 @@ python -m unittest discover tests
 ```
 main.py             入口,Poller 线程 + tk mainloop
 config.py           v1 + v2 schema,load_v2 自动迁移,原子写
-cache.py            models_cache (TTL) + probe_log (JSONL)
+cache.py            models_cache (TTL, 含 order) + probe_log (JSONL)
 notify.py           PS 路径锁定 + alert_many 合并
 providers/
   __init__.py       注册表,collect_entries / fetch_all / _level
   aggregate.py      USD 归一化 + 聚合 level
   detect.py         key 前缀 + URL 提示识别 kind
   generic.py        OpenAI 兼容探测 + 4 种 quota parser
-  relay/minimax/opencode_go/deepseek/zhipu   5 内置 provider
+  relay.py / minimax.py / opencode_go.py / deepseek.py / zhipu.py   5 内置 provider
 ui/
-  panel.py          主面板:聚合行 + provider 行 + 交互
+  panel.py          主面板:provider 行 + 拖拽/拖动/resize
   row_menu.py       行右键菜单
-  model_panel.py    模型列表 + 搜索 + 分组 + 试调 + 价格计算
+  model_panel.py    模型列表 + 拖拽重排 + 搜索 + 分组 + 试调 + 价格计算
   aggregate_detail.py   聚合明细弹窗
-  add_key.py        Add Key 对话框(粘贴即预览)
+  add_key.py        Add Key 对话框:5 预设 + placeholder + 预览
+  settings_dialog.py   设置界面:刷新/告警/预算/汇率
 ```
