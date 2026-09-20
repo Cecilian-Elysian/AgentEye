@@ -1,7 +1,7 @@
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from . import deepseek, minimax, opencode_go, relay, zhipu
+from . import deepseek, generic, minimax, opencode_go, relay, zhipu
 
 ADAPTERS = {
     "relay": relay.fetch,
@@ -9,22 +9,7 @@ ADAPTERS = {
     "opencode_go": opencode_go.fetch,
     "deepseek": deepseek.fetch,
     "zhipu": zhipu.fetch,
-}
-
-KIND_CONFIG_KEY = {
-    "relay": "relay_sites",
-    "minimax": "minimax",
-    "opencode_go": "opencode_go",
-    "deepseek": "deepseek",
-    "zhipu": "zhipu",
-}
-
-DEFAULT_NAMES = {
-    "relay": "中转站",
-    "minimax": "MiniMax",
-    "opencode_go": "OpenCode Go",
-    "deepseek": "DeepSeek",
-    "zhipu": "智谱 GLM",
+    "generic_openai": generic.fetch,
 }
 
 AMOUNT_UNITS = ("$", "¥")
@@ -39,12 +24,12 @@ PLACEHOLDER_KEYS = {
 
 
 def collect_entries(cfg):
-    entries = []
-    for kind, cfg_key in KIND_CONFIG_KEY.items():
-        for entry in cfg.get(cfg_key) or []:
-            if isinstance(entry, dict):
-                entries.append((kind, entry))
-    return entries
+    """v2 schema:从 cfg['providers'] 收集所有条目。"""
+    out = []
+    for p in cfg.get("providers") or []:
+        if isinstance(p, dict):
+            out.append((p.get("kind", ""), p))
+    return out
 
 
 def fetch_all(cfg):
@@ -56,10 +41,31 @@ def fetch_all(cfg):
         return [f.result() for f in futures]
 
 
+def _to_legacy_entry(p):
+    """v2 entry → legacy 适配器期望的 dict 形状。"""
+    entry = {
+        "name": p.get("name"),
+        "api_key": p.get("key"),
+        "token": p.get("key"),
+        "key": p.get("key"),
+        "base_url": p.get("base_url"),
+    }
+    extra = p.get("extra") or {}
+    entry.update(extra)
+    for f in ("warn_amount", "critical_amount", "warn_pct", "critical_pct",
+              "quota_per_usd", "new_api_user_id", "headers"):
+        if f in p:
+            entry[f] = p[f]
+    return entry
+
+
 def _one(kind, entry, cfg):
+    name = entry.get("name") or f"{kind}-provider"
     result = {
-        "name": entry.get("name") or DEFAULT_NAMES[kind],
+        "id": entry.get("id"),
+        "name": name,
         "type": kind,
+        "kind": kind,
         "remaining": None,
         "used": None,
         "total": None,
@@ -72,13 +78,21 @@ def _one(kind, entry, cfg):
         "unconfigured": False,
         "level": "unknown",
     }
-    key = entry.get("api_key") or entry.get("token") or ""
-    login_creds = bool(entry.get("email") and entry.get("password"))
+    key = entry.get("key") or ""
+    login_creds = bool((entry.get("extra") or {}).get("email")
+                       and (entry.get("extra") or {}).get("password"))
     if (not key and not login_creds) or key in PLACEHOLDER_KEYS:
-        result.update({"error": "未配置 key", "unconfigured": True, "level": "unconfigured"})
+        result.update({"error": "未配置 key", "unconfigured": True,
+                       "level": "unconfigured"})
+        return result
+    legacy = _to_legacy_entry(entry)
+    adapter = ADAPTERS.get(kind)
+    if not adapter:
+        result["error"] = f"未知 provider kind: {kind}"
+        result["level"] = "error"
         return result
     try:
-        result.update(ADAPTERS[kind](entry))
+        result.update(adapter(legacy))
     except Exception as e:
         result["error"] = f"{e.__class__.__name__}: {e}"
     result["updated_at"] = time.time()

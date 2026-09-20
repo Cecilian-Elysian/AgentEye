@@ -7,3 +7,9 @@ venv/
 .env
 *.swp
 .DS_Store
+
+# 截图与调试产物
+panel_*.png
+screenshot_*.png
+*.demo.py
+demo_*.py
