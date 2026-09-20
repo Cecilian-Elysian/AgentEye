@@ -51,7 +51,15 @@ def get_models(base_url, api_key, ttl=None):
         return None
     if time.time() - entry.get("fetched_at", 0) > ttl:
         return None
-    return entry.get("models")
+    models = entry.get("models") or []
+    order = entry.get("order") or []
+    if order:
+        present = [m for m in models if m in order]
+        present_set = set(present)
+        extras = [m for m in models if m not in present_set]
+        ordered = [m for m in order if m in present_set] + extras
+        return ordered
+    return models
 
 
 def set_models(base_url, api_key, models):
@@ -62,6 +70,26 @@ def set_models(base_url, api_key, models):
         "fetched_at": time.time(),
     }
     _save_json(MODELS_CACHE, cache)
+
+
+def save_model_order(base_url, api_key, order):
+    """仅持久化排序,不更新 models 列表。"""
+    _ensure()
+    cache = _load_json(MODELS_CACHE)
+    key = _hash(base_url, api_key)
+    entry = cache.get(key) or {"models": [], "fetched_at": time.time()}
+    entry["order"] = list(order)
+    entry["fetched_at"] = time.time()
+    cache[key] = entry
+    _save_json(MODELS_CACHE, cache)
+    # Prune order to only models that still exist
+    models = entry.get("models") or []
+    if models:
+        pruned = [m for m in order if m in models]
+        if pruned != order:
+            entry["order"] = pruned
+            cache[key] = entry
+            _save_json(MODELS_CACHE, cache)
 
 
 def invalidate_models(base_url=None, api_key=None):

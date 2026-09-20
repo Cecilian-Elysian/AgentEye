@@ -137,6 +137,20 @@ def _set_detail_with_tags(text_widget, text, fg):
 
     highlight tag 的前景色会被实时重新配置为 fg。
     """
+
+
+def _compute_target_static(rows, y_root):
+    """纯函数:计算 y_root 应该落在哪个 row 索引。
+
+    rows 是 winfo_rooty/winfo_height 可调用的对象序列。
+    返回 0..len(rows) 之间的索引。
+    """
+    for i, w in enumerate(rows):
+        top = w.winfo_rooty()
+        mid = top + w.winfo_height() / 2
+        if y_root < mid:
+            return i
+    return len(rows)
     text_widget.tag_config("highlight", foreground=fg)
     text_widget.config(state="normal")
     text_widget.delete("1.0", "end")
@@ -335,6 +349,98 @@ class Panel:
                 w.destroy()
                 return
 
+    def _drag_press(self, event, name):
+        if event.widget is self._rows.get(name, {}).get("value"):
+            return
+        self._drag = {
+            "name": name,
+            "start_y": event.y_root,
+            "active": False,
+            "target": None,
+            "original_index": None,
+        }
+
+    def _drag_motion(self, event, name):
+        d = getattr(self, "_drag", None)
+        if not d or d["name"] != name:
+            return
+        if not d["active"]:
+            if abs(event.y_root - d["start_y"]) <= 5:
+                return
+            d["active"] = True
+            widgets = self._rows.get(name)
+            if not widgets:
+                return
+            card = widgets["frame"]
+            d["widget"] = card
+            d["original_index"] = list(self.rows_frame.pack_slaves()).index(card)
+            d["target"] = d["original_index"]
+            self.root.config(cursor="hand2")
+            self._show_drag_indicator()
+        if d["active"]:
+            new_target = self._compute_drag_target(event.y_root, name)
+            if new_target != d["target"]:
+                d["target"] = new_target
+                self._show_drag_indicator()
+
+    def _drag_release(self, event, name):
+        d = getattr(self, "_drag", None)
+        if not d or d["name"] != name:
+            return
+        if d["active"]:
+            self._clear_drag_indicator()
+            self._commit_drag(name, d["target"])
+            self.root.config(cursor="")
+        else:
+            self._clear_drag_indicator()
+        self._drag = None
+
+    def _compute_drag_target(self, y_root, exclude_name):
+        cards = [w for w in self.rows_frame.pack_slaves()
+                 if getattr(w, "_provider_name", None) != exclude_name]
+        return _compute_target_static(cards, y_root)
+
+    def _show_drag_indicator(self):
+        self._clear_drag_indicator()
+        d = getattr(self, "_drag", None)
+        if not d:
+            return
+        cards = [w for w in self.rows_frame.pack_slaves()
+                 if w is not d.get("widget")]
+        indicator = tk.Frame(self.rows_frame, height=3, bg=C["critical"])
+        d["indicator"] = indicator
+        idx = d["target"]
+        if idx < len(cards):
+            indicator.pack(fill="x", pady=0, before=cards[idx])
+        else:
+            indicator.pack(fill="x", pady=0)
+
+    def _clear_drag_indicator(self):
+        d = getattr(self, "_drag", None)
+        if d and d.get("indicator"):
+            try:
+                d["indicator"].destroy()
+            except tk.TclError:
+                pass
+            d["indicator"] = None
+
+    def _commit_drag(self, name, new_index):
+        widgets = self._rows.get(name)
+        if not widgets:
+            return
+        card = widgets["frame"]
+        cards = [w for w in self.rows_frame.pack_slaves() if w is not card]
+        cards.insert(max(0, min(new_index, len(cards))), card)
+        for w in self.rows_frame.pack_slaves():
+            w.pack_forget()
+        for w in cards:
+            w.pack(fill="x", pady=3)
+        new_order = [getattr(c, "_provider_name", "") for c in cards]
+        save_order = self.actions.get("save_order")
+        if save_order:
+            save_order(new_order)
+        self._sig = None
+
     def _maybe_welcome(self):
         import os
         flag = os.path.expanduser(FIRST_RUN_FLAG)
@@ -400,12 +506,20 @@ class Panel:
             box = self._row_skeleton("未配置任何 provider", "右键 + 添加 Key")
             box["value"].config(text="-", fg=C["off"])
             return
-        for r in results:
+        order = []
+        get_order = self.actions.get("get_order")
+        if get_order:
+            order = get_order()
+        name_to_result = {r["name"]: r for r in results}
+        ordered = [name_to_result[n] for n in order if n in name_to_result]
+        ordered += [r for r in results if r["name"] not in order]
+        for r in ordered:
             self._rows[r["name"]] = self._row_skeleton(r["name"], "")
 
     def _row_skeleton(self, name, detail):
         card = tk.Frame(self.rows_frame, bg=C["card"], cursor="hand2")
         card.pack(fill="x", pady=3)
+        card._provider_name = name
         top = tk.Frame(card, bg=C["card"])
         top.pack(fill="x", padx=8, pady=(6, 0))
         name_lbl = tk.Label(top, text=name, font=(FONT, 9, "bold"),
@@ -440,6 +554,11 @@ class Panel:
 
         card.bind("<Button-3>", lambda e, n=name: self._popup_row_menu(e, n))
         name_lbl.bind("<Button-3>", lambda e, n=name: self._popup_row_menu(e, n))
+
+        for w in (card, top, name_lbl, det_lbl, bar):
+            w.bind("<Button-1>", lambda e, n=name: self._drag_press(e, n), add="+")
+            w.bind("<B1-Motion>", lambda e, n=name: self._drag_motion(e, n), add="+")
+            w.bind("<ButtonRelease-1>", lambda e, n=name: self._drag_release(e, n), add="+")
 
         return widgets
 
@@ -525,7 +644,12 @@ class Panel:
                 return False, 0.0, "未配置 probe_model"
             return fn(model_id, base_url, key)
 
-        ModelPanel(self.root, name, models, on_probe=_probe_cb)
+        save_model_order = self.actions.get("save_model_order")
+        def _on_reorder(new_order):
+            if save_model_order:
+                save_model_order(name, base_url, key, new_order)
+        ModelPanel(self.root, name, models, on_probe=_probe_cb,
+                   on_reorder=_on_reorder)
 
     def _paint_row(self, widgets, r):
         ratio_val = _usage_ratio(r)

@@ -19,16 +19,19 @@ class ModelPanel(tk.Toplevel):
         ("Audio", ("whisper", "tts", "audio")),
     ]
 
-    def __init__(self, parent, provider_name, models, on_probe=None):
+    def __init__(self, parent, provider_name, models, on_probe=None,
+                 on_reorder=None):
         super().__init__(parent)
         self.title(f"{provider_name} · 模型列表")
         self.configure(bg="#1d1d2b")
         self.geometry("420x520")
         self.transient(parent)
 
-        self.models = models or []
+        self.models = list(models or [])
         self.filtered = list(self.models)
         self.on_probe = on_probe
+        self.on_reorder = on_reorder
+        self._drag = None
 
         BG = "#1d1d2b"
         FG = "#e8e8f0"
@@ -135,8 +138,9 @@ class ModelPanel(tk.Toplevel):
             tk.Label(self.inner, text=group_name, bg=BG, fg=DIM,
                      font=(FONT[0], 9, "bold")).pack(anchor="w", pady=(8, 2))
             for m in grouped[group_name]:
-                row = tk.Frame(self.inner, bg="#15151d")
+                row = tk.Frame(self.inner, bg="#15151d", cursor="hand2")
                 row.pack(fill="x", pady=1)
+                row._model_id = m
                 tk.Label(row, text=m, bg="#15151d", fg=FG,
                          font=FONT, anchor="w").pack(side="left", padx=8, pady=4)
                 if self.on_probe:
@@ -148,6 +152,107 @@ class ModelPanel(tk.Toplevel):
                                       bg="#2a2a3a", fg=FG, cursor="hand2")
                 select_btn.pack(side="right", padx=(0, 4), pady=2)
                 select_btn.bind("<Button-1>", lambda e, model=m: self._select_model(model))
+
+                for child in row.winfo_children():
+                    child.bind("<Button-1>", lambda e, mid=m: self._drag_press(e, mid), add="+")
+                    child.bind("<B1-Motion>", lambda e, mid=m: self._drag_motion(e, mid), add="+")
+                    child.bind("<ButtonRelease-1>", lambda e, mid=m: self._drag_release(e, mid), add="+")
+                row.bind("<Button-1>", lambda e, mid=m: self._drag_press(e, mid), add="+")
+                row.bind("<B1-Motion>", lambda e, mid=m: self._drag_motion(e, mid), add="+")
+                row.bind("<ButtonRelease-1>", lambda e, mid=m: self._drag_release(e, mid), add="+")
+
+    def _drag_press(self, event, mid):
+        w = event.widget
+        if isinstance(w, tk.Button):
+            return
+        try:
+            if w.cget("text") == "选":
+                return
+        except (tk.TclError, AttributeError):
+            pass
+        self._drag = {
+            "mid": mid, "start_y": event.y_root,
+            "active": False, "target": None, "indicator": None,
+        }
+
+    def _drag_motion(self, event, mid):
+        d = getattr(self, "_drag", None)
+        if not d or d["mid"] != mid:
+            return
+        if not d["active"]:
+            if abs(event.y_root - d["start_y"]) <= 5:
+                return
+            d["active"] = True
+            d["target"] = self._model_target_index(mid, event.y_root)
+            self._show_model_indicator()
+        if d["active"]:
+            new_target = self._model_target_index(mid, event.y_root)
+            if new_target != d["target"]:
+                d["target"] = new_target
+                self._show_model_indicator()
+
+    def _drag_release(self, event, mid):
+        d = getattr(self, "_drag", None)
+        if not d or d["mid"] != mid:
+            return
+        if d["active"] and d["target"] is not None:
+            self._commit_model_drag(mid, d["target"])
+        self._clear_model_indicator()
+        self._drag = None
+
+    def _model_target_index(self, exclude_mid, y_root):
+        rows = [w for w in self.inner.pack_slaves()
+                if isinstance(w, tk.Frame) and hasattr(w, "_model_id")
+                and w._model_id != exclude_mid]
+        for i, w in enumerate(rows):
+            try:
+                top = w.winfo_rooty()
+            except tk.TclError:
+                continue
+            mid_y = top + w.winfo_height() / 2
+            if y_root < mid_y:
+                return i
+        return len(rows)
+
+    def _show_model_indicator(self):
+        self._clear_model_indicator()
+        d = getattr(self, "_drag", None)
+        if not d:
+            return
+        rows = [w for w in self.inner.pack_slaves()
+                if isinstance(w, tk.Frame) and hasattr(w, "_model_id")
+                and w._model_id != d["mid"]]
+        indicator = tk.Frame(self.inner, height=2, bg="#ff5d5d")
+        d["indicator"] = indicator
+        idx = d["target"]
+        if idx < len(rows):
+            indicator.pack(fill="x", pady=0, before=rows[idx])
+        else:
+            indicator.pack(fill="x", pady=0)
+
+    def _clear_model_indicator(self):
+        d = getattr(self, "_drag", None)
+        if d and d.get("indicator"):
+            try:
+                d["indicator"].destroy()
+            except tk.TclError:
+                pass
+            d["indicator"] = None
+
+    def _commit_model_drag(self, mid, new_index):
+        if mid not in self.models:
+            return
+        self.models.remove(mid)
+        self.models.insert(max(0, min(new_index, len(self.models))), mid)
+        if hasattr(self, "filtered") and mid in self.filtered:
+            self.filtered.remove(mid)
+            self.filtered.insert(max(0, min(new_index, len(self.filtered))), mid)
+        if self.on_reorder:
+            try:
+                self.on_reorder(list(self.models))
+            except Exception:
+                pass
+        self._render()
 
     def _probe(self, model):
         if not self.on_probe:
