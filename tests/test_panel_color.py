@@ -1,0 +1,91 @@
+"""测试 _usage_ratio / _usage_color 渐变色彩函数。"""
+import unittest
+
+import ui.panel as panel
+
+
+class UsageColor(unittest.TestCase):
+    def test_ratio_amount_with_total(self):
+        r = {"unit": "$", "used": 13.28, "total": 30.0, "level": "warn"}
+        ratio = panel._usage_ratio(r)
+        self.assertAlmostEqual(ratio, 13.28 / 30.0, places=4)
+
+    def test_ratio_amount_no_total_falls_back_to_level(self):
+        r = {"unit": "$", "remaining": 16.72, "level": "warn"}
+        ratio = panel._usage_ratio(r)
+        self.assertEqual(ratio, 0.55)
+
+    def test_ratio_percent_inverts(self):
+        r = {"unit": "%", "pct": 73, "level": "warn"}
+        self.assertAlmostEqual(panel._usage_ratio(r), 0.27, places=4)
+        r = {"unit": "%", "pct": 30, "level": "critical"}
+        self.assertAlmostEqual(panel._usage_ratio(r), 0.70, places=4)
+
+    def test_ratio_unconfigured_is_none(self):
+        self.assertIsNone(panel._usage_ratio({"unconfigured": True}))
+        self.assertIsNone(panel._usage_ratio({"error": "boom"}))
+
+    def test_ratio_clamps(self):
+        r = {"unit": "$", "used": 50, "total": 30, "level": "ok"}
+        self.assertEqual(panel._usage_ratio(r), 1.0)
+        r = {"unit": "$", "used": -5, "total": 30, "level": "ok"}
+        self.assertEqual(panel._usage_ratio(r), 0.0)
+
+    def test_color_endpoints(self):
+        c0 = panel._usage_color(0.0)
+        c1 = panel._usage_color(1.0)
+        self.assertEqual(c0, "#53d77a")
+        self.assertEqual(c1, "#ff5d5d")
+
+    def test_color_midpoint_is_yellow_ish(self):
+        c = panel._usage_color(0.5)
+        r, g, b = int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16)
+        self.assertGreater(r, g)
+        self.assertGreater(g, b)
+
+    def test_color_moves_toward_red(self):
+        green = panel._usage_color(0.0)
+        yellow = panel._usage_color(0.5)
+        red = panel._usage_color(1.0)
+
+        def dist_to_red(c):
+            r, g, b = int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16)
+            return (255 - r) ** 2 + g ** 2 + b ** 2
+
+        d_green = dist_to_red(green)
+        d_yellow = dist_to_red(yellow)
+        d_red = dist_to_red(red)
+        self.assertGreater(d_green, d_yellow)
+        self.assertGreater(d_yellow, d_red)
+
+    def test_color_clamp(self):
+        self.assertEqual(panel._usage_color(-0.5), panel._usage_color(0.0))
+        self.assertEqual(panel._usage_color(1.5), panel._usage_color(1.0))
+
+    def test_color_none(self):
+        self.assertEqual(panel._usage_color(None), panel.C["dim"])
+
+
+class DetailRegex(unittest.TestCase):
+    def test_currency_matches(self):
+        text = "[/v1/usage] 今日 $0.00 · 0 次 · 累计实付 $13.28"
+        ms = list(panel._DETAIL_NUMBER_RE.finditer(text))
+        self.assertEqual([m.group(0) for m in ms], ["$0.00", "$13.28"])
+
+    def test_yuan_matches(self):
+        text = "赠金 ¥0.00 · 充值 ¥23.75"
+        ms = list(panel._DETAIL_NUMBER_RE.finditer(text))
+        self.assertEqual([m.group(0) for m in ms], ["¥0.00", "¥23.75"])
+
+    def test_percent_matches(self):
+        text = "[coding_plan] general 5h 73% · 周 87% | 重置 3h59m"
+        ms = list(panel._DETAIL_NUMBER_RE.finditer(text))
+        self.assertEqual([m.group(0) for m in ms], ["73%", "87%"])
+
+    def test_reset_time_not_matched(self):
+        self.assertEqual(panel._DETAIL_NUMBER_RE.findall("重置 3h59m"), [])
+        self.assertEqual(panel._DETAIL_NUMBER_RE.findall("0 次"), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

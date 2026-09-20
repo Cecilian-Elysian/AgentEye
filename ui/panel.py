@@ -3,8 +3,10 @@
 - provider 行 (每行带 hover / 复制 / 右键菜单)
 - 底部:状态栏 (下次刷新倒计时)
 - 交互:拖拽带边缘磁吸,光标反馈,快捷键 (F5/Esc/Ctrl+Q)
+- 颜色:基于消耗比的绿→黄→红渐变,主值与 detail 中所有金额/百分比同步上色
 """
 
+import re
 import time
 import tkinter as tk
 
@@ -72,6 +74,65 @@ def _time_ago(ts):
     if delta < 86400:
         return f"{delta // 3600} 小时前"
     return f"{delta // 86400} 天前"
+
+
+def _usage_ratio(result):
+    """返回 0..1 之间的"消耗占比"。0=全新,1=耗尽。"""
+    if result.get("unconfigured") or result.get("error"):
+        return None
+    unit = result.get("unit") or ""
+    used = result.get("used")
+    total = result.get("total")
+    pct = result.get("pct")
+
+    if unit in ("$", "¥", "额度") and isinstance(total, (int, float)) and total > 0:
+        u = used if isinstance(used, (int, float)) else 0
+        return max(0.0, min(1.0, u / total))
+    if unit == "%" and isinstance(pct, (int, float)):
+        return max(0.0, min(1.0, (100 - pct) / 100))
+
+    level = result.get("level", "ok")
+    return {"ok": 0.15, "warn": 0.55, "critical": 0.85}.get(level, 0.15)
+
+
+def _usage_color(ratio):
+    """绿(0) → 黄(0.5) → 红(1) 三色插值。"""
+    if ratio is None:
+        return C["dim"]
+    ratio = max(0.0, min(1.0, ratio))
+    if ratio <= 0.5:
+        t = ratio / 0.5
+        r = int(0x53 + (0xf0 - 0x53) * t)
+        g = int(0xd7 + (0xc2 - 0xd7) * t)
+        b = int(0x7a + (0x4b - 0x7a) * t)
+    else:
+        t = (ratio - 0.5) / 0.5
+        r = int(0xf0 + (0xff - 0xf0) * t)
+        g = int(0xc2 + (0x5d - 0xc2) * t)
+        b = int(0x4b + (0x5d - 0x4b) * t)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+_DETAIL_NUMBER_RE = re.compile(r"([\$¥][\d.,]+|\d+%)")
+
+
+def _set_detail_with_tags(text_widget, text, fg):
+    """清空 detail Text 并插入 text,$X/¥X/X% 数字段用 highlight tag,其余用 dim。
+
+    highlight tag 的前景色会被实时重新配置为 fg。
+    """
+    text_widget.tag_config("highlight", foreground=fg)
+    text_widget.config(state="normal")
+    text_widget.delete("1.0", "end")
+    pos = 0
+    for m in _DETAIL_NUMBER_RE.finditer(text):
+        if m.start() > pos:
+            text_widget.insert("end", text[pos:m.start()], "dim")
+        text_widget.insert("end", m.group(0), "highlight")
+        pos = m.end()
+    if pos < len(text):
+        text_widget.insert("end", text[pos:], "dim")
+    text_widget.config(state="disabled")
 
 
 class Panel:
@@ -278,10 +339,15 @@ class Panel:
         value_lbl = tk.Label(top, text="…", font=(FONT, 9),
                              fg=C["dim"], bg=C["card"], cursor="hand2")
         value_lbl.pack(side="right")
-        det_lbl = tk.Label(card, text=detail, font=(FONT, 7),
-                           fg=C["dim"], bg=C["card"], anchor="w",
-                           wraplength=300, justify="left")
+        det_lbl = tk.Text(card, font=(FONT, 9), fg=C["dim"], bg=C["card"],
+                          wrap="word", height=1, bd=0, highlightthickness=0,
+                          padx=0, pady=2, cursor="arrow", takefocus=0)
         det_lbl.pack(fill="x", padx=8)
+        det_lbl.tag_config("dim", foreground=C["dim"])
+        det_lbl.tag_config("highlight", foreground=C["dim"])
+        det_lbl.tag_raise("sel", "dim")
+        det_lbl.insert("end", detail or "")
+        det_lbl.config(state="disabled")
         bar = tk.Canvas(card, height=5, bg=C["bar_bg"], highlightthickness=0)
         bar.pack(fill="x", padx=8, pady=(4, 7))
         rect = bar.create_rectangle(0, 0, 0, 5, outline="")
@@ -387,15 +453,22 @@ class Panel:
         ModelPanel(self.root, name, models, on_probe=_probe_cb)
 
     def _paint_row(self, widgets, r):
+        ratio_val = _usage_ratio(r)
+        color = _usage_color(ratio_val)
         key = (r.get("name"), r.get("level"), r.get("remaining"),
                r.get("total"), r.get("pct"), r.get("detail"), r.get("error"),
-               r.get("updated_at"))
+               r.get("updated_at"), ratio_val)
         if self._last_paint.get(widgets["provider_name"]) == key:
             return
         self._last_paint[widgets["provider_name"]] = key
 
         level = r.get("level", "unknown")
-        color = LEVEL_COLOR.get(level, C["dim"])
+        if ratio_val is None or r.get("unconfigured"):
+            color = C["off"]
+        elif level in ("error",):
+            color = C["error"]
+        elif level == "unknown":
+            color = C["dim"]
         widgets["value"].config(text=_fmt_main(r), fg=color)
 
         detail = r.get("detail") or ""
@@ -407,7 +480,7 @@ class Panel:
                 detail = f"{detail} · 上次失败 {ago}" if detail else f"上次失败 {ago}"
         if not detail:
             detail = f"更新于 {time.strftime('%H:%M:%S', time.localtime(r.get('updated_at', 0)))}"
-        widgets["detail"].config(text=detail)
+        _set_detail_with_tags(widgets["detail"], detail, color)
 
         pct = r.get("pct")
         frac = None
