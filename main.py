@@ -62,6 +62,7 @@ class Poller(threading.Thread):
             return
         cooldown = float(alert_cfg.get("cooldown_min", 60)) * 60
         now = time.time()
+        items = []
         for r in results:
             level = r.get("level")
             if level not in ("warn", "critical"):
@@ -72,7 +73,9 @@ class Poller(threading.Thread):
                 continue
             self.notified[key] = (level, now)
             verb = "额度告急" if level == "critical" else "额度偏低"
-            notify.alert(f"AgentEye · {r['name']}", verb)
+            items.append((r["name"], verb))
+        if items:
+            notify.alert_many(items)
 
 
 def _infer_kind_from_dialog(entry):
@@ -130,6 +133,37 @@ def build_actions(root, cfg, state, stop, wake):
             wake.set()
         AddKeyDialog(root, on_save=_on_save)
 
+    def probe_model(model_id, base_url, key, timeout=10.0):
+        """1-token 试调:返回 (ok, latency_ms, error) 三元组。"""
+        import requests
+        if not base_url or not key:
+            return False, 0.0, "缺少 base_url 或 key"
+        url = base_url.rstrip("/")
+        url = url + "/chat/completions" if url.endswith("/v1") else url + "/v1/chat/completions"
+        try:
+            t0 = time.time()
+            r = requests.post(
+                url,
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json={"model": model_id, "messages": [{"role": "user", "content": "hi"}],
+                      "max_tokens": 1},
+                timeout=timeout,
+            )
+            latency = (time.time() - t0) * 1000
+        except requests.RequestException as e:
+            return False, 0.0, str(e.__class__.__name__)
+        if r.status_code in (401, 403):
+            return False, latency, f"key 无效 (HTTP {r.status_code})"
+        if r.status_code != 200:
+            return False, latency, f"HTTP {r.status_code}"
+        import cache
+        try:
+            cache.log_probe(provider_name="", model_id=model_id,
+                            success=True, latency_ms=latency)
+        except Exception:
+            pass
+        return True, latency, ""
+
     return {
         "refresh_now": refresh_now,
         "toggle_pause": toggle_pause,
@@ -138,6 +172,7 @@ def build_actions(root, cfg, state, stop, wake):
         "save_position": save_position,
         "quit": quit_app,
         "add_key": add_key,
+        "probe_model": probe_model,
     }
 
 

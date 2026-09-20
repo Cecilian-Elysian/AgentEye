@@ -48,6 +48,21 @@ class ModelPanel(tk.Toplevel):
                  bg="#15151d", fg=FG, insertbackground=FG,
                  font=FONT, relief="flat").pack(fill="x")
 
+        calc_frame = tk.Frame(self, bg=BG)
+        calc_frame.pack(fill="x", padx=12, pady=(4, 0))
+        tk.Label(calc_frame, text="估算调用", bg=BG, fg=DIM,
+                 font=(FONT, 9)).pack(side="left")
+        self.calc_n_var = tk.StringVar(value="100")
+        tk.Entry(calc_frame, textvariable=self.calc_n_var, width=6,
+                 bg="#15151d", fg=FG, insertbackground=FG,
+                 font=(FONT, 9), relief="flat").pack(side="left", padx=(4, 2))
+        tk.Label(calc_frame, text="次 (按选定模型)", bg=BG, fg=DIM,
+                 font=(FONT, 9)).pack(side="left")
+        self.calc_cost_var = tk.StringVar(value="选择模型后查看")
+        tk.Label(calc_frame, textvariable=self.calc_cost_var,
+                 bg=BG, fg="#53d77a", font=(FONT, 9, "bold")).pack(
+            side="right")
+
         list_frame = tk.Frame(self, bg=BG)
         list_frame.pack(fill="both", expand=True, padx=12, pady=8)
 
@@ -129,12 +144,23 @@ class ModelPanel(tk.Toplevel):
                               bg="#2a2a3a", fg=FG, relief="flat",
                               command=lambda model=m: self._probe(model)).pack(
                         side="right", padx=4, pady=2)
+                select_btn = tk.Label(row, text="选", font=(FONT[0], 8),
+                                      bg="#2a2a3a", fg=FG, cursor="hand2")
+                select_btn.pack(side="right", padx=(0, 4), pady=2)
+                select_btn.bind("<Button-1>", lambda e, model=m: self._select_model(model))
 
     def _probe(self, model):
         if not self.on_probe:
             return
         threading.Thread(target=self._probe_worker, args=(model,),
                          daemon=True).start()
+
+    def _select_model(self, model):
+        self.calc_cost_var.set(_estimate_cost(model, self.calc_n_var.get()))
+
+    def _on_calc_change(self):
+        if hasattr(self, "_last_selected") and self._last_selected:
+            self.calc_cost_var.set(_estimate_cost(self._last_selected, self.calc_n_var.get()))
 
     def _probe_worker(self, model):
         try:
@@ -147,3 +173,39 @@ class ModelPanel(tk.Toplevel):
         msg = f"{'✓' if ok else '✗'} {model}"
         msg += f"  {latency_ms:.0f}ms" if ok else f"  {error}"
         print(msg)
+
+
+# 常见模型公开价(USD per 1M tokens),粗略。生产环境应从 provider /pricing 端点拉。
+PRICE_TABLE = {
+    "gpt-4o": (2.5, 10.0),
+    "gpt-4o-mini": (0.15, 0.6),
+    "gpt-4-turbo": (10.0, 30.0),
+    "claude-3-5-sonnet": (3.0, 15.0),
+    "claude-3-5-haiku": (0.8, 4.0),
+    "claude-3-opus": (15.0, 75.0),
+    "deepseek-chat": (0.27, 1.1),
+    "deepseek-reasoner": (0.55, 2.19),
+    "glm-4-plus": (7.0, 7.0),
+    "glm-4-flash": (0.0, 0.0),
+}
+
+
+def _estimate_cost(model, n_calls):
+    try:
+        n = int(n_calls or 0)
+    except ValueError:
+        return "次数无效"
+    if n <= 0:
+        return "—"
+    mid = model.lower()
+    matched = None
+    for key, price in PRICE_TABLE.items():
+        if key in mid or mid in key:
+            matched = price
+            break
+    if matched is None:
+        return f"无价表 (需手填)"
+    in_p, out_p = matched
+    avg_in, avg_out = 500, 200
+    cost = (in_p * avg_in + out_p * avg_out) / 1_000_000 * n
+    return f"≈ ${cost:.4f}"

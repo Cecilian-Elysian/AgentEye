@@ -409,20 +409,36 @@ class Panel:
                 return
 
     def _show_models(self, name):
+        provider_cfg = None
+        for p in self.cfg.get("providers") or []:
+            if p.get("name") == name:
+                provider_cfg = p
+                break
+        if not provider_cfg:
+            return
+        base_url = provider_cfg.get("base_url") or ""
+        key = provider_cfg.get("key") or ""
+        models = None
         for r in (self.state.results or []):
-            if r.get("name") != name:
-                continue
-            models = r.get("models") or []
-            if not models:
-                try:
-                    import notify
-                    notify.alert("AgentEye", f"{name}: 无模型数据,可能未启用 /v1/models")
-                except Exception:
-                    pass
-                return
-            from ui.model_panel import ModelPanel
-            ModelPanel(self.root, name, models,
-                       on_probe=self.actions.get("probe_model"))
+            if r.get("name") == name:
+                models = r.get("models")
+                break
+        if not models:
+            try:
+                import notify
+                notify.alert("AgentEye", f"{name}: 无模型数据,可能未启用 /v1/models")
+            except Exception:
+                pass
+            return
+        from ui.model_panel import ModelPanel
+
+        def _probe_cb(model_id):
+            fn = self.actions.get("probe_model")
+            if not fn:
+                return False, 0.0, "未配置 probe_model"
+            return fn(model_id, base_url, key)
+
+        ModelPanel(self.root, name, models, on_probe=_probe_cb)
 
     def _paint_row(self, widgets, r):
         key = (r.get("name"), r.get("level"), r.get("remaining"),
