@@ -42,13 +42,19 @@ def _fmt_main(result):
     unit = result.get("unit") or ""
     prefix = "≈" if result.get("is_estimate") else ""
     if unit in ("$", "¥"):
+        total = result.get("total")
+        used_today = result.get("used_today")
+        if isinstance(used_today, (int, float)):
+            today_str = f"{prefix}{unit}{used_today:,.2f}"
+            if total:
+                return f"今日 {today_str} / {unit}{total:,.2f}"
+            return f"今日 {today_str}"
         rem = result.get("remaining")
         if rem is None:
             return "-"
-        text = f"{prefix}{unit}{rem:,.2f}"
-        if result.get("total"):
-            text += f" / {unit}{result['total']:,.2f}"
-        return text
+        if total:
+            return f"{prefix}{unit}{rem:,.2f} / {unit}{total:,.2f}"
+        return f"{prefix}{unit}{rem:,.2f}"
     if unit == "%":
         pct = result.get("pct")
         return f"{pct:.0f}%" if pct is not None else "-"
@@ -77,17 +83,24 @@ def _time_ago(ts):
 
 
 def _usage_ratio(result):
-    """返回 0..1 之间的"消耗占比"。0=全新,1=耗尽。"""
+    """返回 0..1 之间的"消耗占比"。0=全新,1=耗尽。
+
+    金额行优先用 used_today/total(贴近"今日消耗"语义),
+    否则用 used/total,否则按 level 降级映射。
+    """
     if result.get("unconfigured") or result.get("error"):
         return None
     unit = result.get("unit") or ""
     used = result.get("used")
+    used_today = result.get("used_today")
     total = result.get("total")
     pct = result.get("pct")
 
     if unit in ("$", "¥", "额度") and isinstance(total, (int, float)) and total > 0:
-        u = used if isinstance(used, (int, float)) else 0
-        return max(0.0, min(1.0, u / total))
+        if isinstance(used_today, (int, float)):
+            return max(0.0, min(1.0, used_today / total))
+        if isinstance(used, (int, float)):
+            return max(0.0, min(1.0, used / total))
     if unit == "%" and isinstance(pct, (int, float)):
         return max(0.0, min(1.0, (100 - pct) / 100))
 

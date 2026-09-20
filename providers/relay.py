@@ -154,12 +154,20 @@ def _parse_key_usage(body, entry):
         if used is not None:
             used = float(used)
             parts.append(f"累计实付 {sym}{used:.2f}")
+    used_today = None
+    if today:
+        tcost = today.get("actual_cost")
+        if tcost is None:
+            tcost = today.get("cost")
+        if tcost is not None:
+            used_today = float(tcost)
     plan = body.get("planName")
     if plan:
         parts.append(str(plan))
     return {
         "remaining": remaining,
         "used": used,
+        "used_today": used_today,
         "total": None,
         "unit": sym,
         "pct": None,
@@ -188,6 +196,7 @@ def _parse_new_api(body, entry):
     return {
         "remaining": remaining,
         "used": used_usd,
+        "used_today": None,
         "total": total,
         "unit": "$",
         "pct": pct,
@@ -226,6 +235,7 @@ def _parse_generic(body, entry):
         return {
             "remaining": sum_remaining,
             "used": sum_used or None,
+            "used_today": None,
             "total": sum_total,
             "unit": unit,
             "pct": pct,
@@ -235,6 +245,7 @@ def _parse_generic(body, entry):
     return {
         "remaining": sum_remaining,
         "used": sum_used or None,
+        "used_today": None,
         "total": None,
         "unit": unit,
         "pct": None,

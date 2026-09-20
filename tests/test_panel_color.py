@@ -66,6 +66,51 @@ class UsageColor(unittest.TestCase):
         self.assertEqual(panel._usage_color(None), panel.C["dim"])
 
 
+class UsageRatioToday(unittest.TestCase):
+    def test_used_today_preferred_over_cumulative(self):
+        r = {"unit": "$", "used_today": 5.0, "used": 20.0, "total": 30.0}
+        self.assertAlmostEqual(panel._usage_ratio(r), 5.0 / 30.0, places=4)
+
+    def test_used_today_none_falls_back_to_cumulative(self):
+        r = {"unit": "$", "used_today": None, "used": 20.0, "total": 30.0}
+        self.assertAlmostEqual(panel._usage_ratio(r), 20.0 / 30.0, places=4)
+
+    def test_used_today_zero(self):
+        r = {"unit": "$", "used_today": 0.0, "used": 20.0, "total": 30.0}
+        self.assertEqual(panel._usage_ratio(r), 0.0)
+
+
+class FmtMain(unittest.TestCase):
+    def test_amount_with_used_today_and_total(self):
+        r = {"unit": "$", "used_today": 0.0, "total": 30.0, "remaining": 16.72}
+        self.assertEqual(panel._fmt_main(r), "今日 $0.00 / $30.00")
+
+    def test_amount_used_today_none_falls_back_to_remaining(self):
+        r = {"unit": "$", "used_today": None, "total": 30.0, "remaining": 16.72}
+        self.assertEqual(panel._fmt_main(r), "$16.72 / $30.00")
+
+    def test_amount_no_total_uses_remaining(self):
+        r = {"unit": "$", "used_today": None, "total": None, "remaining": 16.72}
+        self.assertEqual(panel._fmt_main(r), "$16.72")
+
+    def test_amount_used_today_no_total(self):
+        r = {"unit": "$", "used_today": 0.0, "total": None, "remaining": 16.72}
+        self.assertEqual(panel._fmt_main(r), "今日 $0.00")
+
+    def test_amount_yuan(self):
+        r = {"unit": "¥", "used_today": 1.5, "total": 100.0, "remaining": 23.75}
+        self.assertEqual(panel._fmt_main(r), "今日 ¥1.50 / ¥100.00")
+
+    def test_percent_unchanged(self):
+        self.assertEqual(panel._fmt_main({"unit": "%", "pct": 73}), "73%")
+
+    def test_unconfigured(self):
+        self.assertEqual(panel._fmt_main({"unconfigured": True}), "未配置")
+
+    def test_error(self):
+        self.assertEqual(panel._fmt_main({"error": "boom"}), "查询失败")
+
+
 class DetailRegex(unittest.TestCase):
     def test_currency_matches(self):
         text = "[/v1/usage] 今日 $0.00 · 0 次 · 累计实付 $13.28"
