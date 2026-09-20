@@ -125,7 +125,7 @@ V2_TEMPLATE = {
         "monthly_budget_usd": 100.0,
         "currency_rate_cny_per_usd": 7.2,
     },
-    "ui": {"x": None, "y": None},
+    "ui": {"x": None, "y": None, "width": 360, "height": 360},
     "providers": [],
 }
 

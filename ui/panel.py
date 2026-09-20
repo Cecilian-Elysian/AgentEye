@@ -32,6 +32,9 @@ LEVEL_COLOR["unknown"] = C["dim"]
 
 EDGE_SNAP = 20
 FIRST_RUN_FLAG = "~/.agenteye/.first_run_done"
+MIN_W, MIN_H = 280, 180
+MAX_W, MAX_H = 800, 900
+RESIZE_GRIP = 16
 
 
 def _fmt_main(result):
@@ -187,14 +190,21 @@ class Panel:
 
         self._tick()
         self._maybe_welcome()
+        self._build_resize_grip()
+        self.root.bind("<Configure>", self._on_root_configure)
 
     def _place_initial(self):
         ui = self.cfg.get("ui") or {}
         x, y = ui.get("x"), ui.get("y")
+        w = ui.get("width") or 360
+        h = ui.get("height") or 360
         if x is None or y is None:
             sw = self.root.winfo_screenwidth()
-            x, y = sw - 320 - 20, 60
-        self.root.geometry(f"+{int(x)}+{int(y)}")
+            x, y = sw - w - 20, 60
+        self.root.update_idletasks()
+        self.root.geometry(f"{int(w)}x{int(h)}+{int(x)}+{int(y)}")
+        self.root.minsize(MIN_W, MIN_H)
+        self.root.maxsize(MAX_W, MAX_H)
 
     def _build_header(self):
         header = tk.Frame(self.root, bg=C["bg"])
@@ -266,6 +276,58 @@ class Panel:
         self.root.config(cursor="")
         self.actions["save_position"](
             self.root.winfo_x(), self.root.winfo_y())
+        save_size = self.actions.get("save_size")
+        if save_size:
+            save_size(self.root.winfo_width(), self.root.winfo_height())
+
+    def _build_resize_grip(self):
+        grip = tk.Frame(self.root, bg=C["bg"], cursor="size_nw_se",
+                        width=RESIZE_GRIP, height=RESIZE_GRIP)
+        grip.pack(side="bottom", anchor="se")
+        grip.bind("<Button-1>", self._resize_start)
+        grip.bind("<B1-Motion>", self._resize_move)
+        grip.bind("<ButtonRelease-1>", self._resize_end)
+        for i in range(3):
+            r = tk.Frame(grip, bg=C["dim"], width=2, height=2)
+            r.place(x=RESIZE_GRIP - 2 - i * 4, y=RESIZE_GRIP - 2 - i * 4)
+        self._resize_grip = grip
+
+    def _resize_start(self, event):
+        self._rx = event.x_root
+        self._ry = event.y_root
+        self._rw = self.root.winfo_width()
+        self._rh = self.root.winfo_height()
+        self._resize_saved = False
+
+    def _resize_move(self, event):
+        dx = event.x_root - self._rx
+        dy = event.y_root - self._ry
+        new_w = max(MIN_W, min(MAX_W, self._rw + dx))
+        new_h = max(MIN_H, min(MAX_H, self._rh + dy))
+        self.root.geometry(f"{int(new_w)}x{int(new_h)}")
+
+    def _resize_end(self, event):
+        save_size = self.actions.get("save_size")
+        if save_size:
+            save_size(self.root.winfo_width(), self.root.winfo_height())
+
+    def _on_root_configure(self, event):
+        if event.widget is not self.root:
+            return
+        try:
+            width = self.root.winfo_width()
+        except tk.TclError:
+            return
+        if width <= 1:
+            return
+        wrap = max(120, width - 36)
+        for w in self._rows.values():
+            d = w.get("detail")
+            if d is not None:
+                try:
+                    d.configure(wraplength=wrap)
+                except tk.TclError:
+                    pass
 
     def _close_any_popup(self):
         for w in self.root.winfo_children():

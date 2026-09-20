@@ -109,6 +109,11 @@ def build_actions(root, cfg, state, stop, wake):
         ui["x"], ui["y"] = int(x), int(y)
         config_mod.save_v2(cfg)
 
+    def save_size(w, h):
+        ui = cfg.setdefault("ui", {})
+        ui["width"], ui["height"] = int(w), int(h)
+        config_mod.save_v2(cfg)
+
     def quit_app():
         stop.set()
         wake.set()
@@ -170,6 +175,7 @@ def build_actions(root, cfg, state, stop, wake):
         "test_notify": test_notify,
         "open_config": open_config,
         "save_position": save_position,
+        "save_size": save_size,
         "quit": quit_app,
         "add_key": add_key,
         "probe_model": probe_model,
