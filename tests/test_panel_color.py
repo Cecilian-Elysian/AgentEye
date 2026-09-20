@@ -132,5 +132,33 @@ class DetailRegex(unittest.TestCase):
         self.assertEqual(panel._DETAIL_NUMBER_RE.findall("0 次"), [])
 
 
+class IsAmountMode(unittest.TestCase):
+    def test_dollar(self):
+        self.assertTrue(panel._is_amount_mode({"unit": "$"}))
+
+    def test_yuan(self):
+        self.assertTrue(panel._is_amount_mode({"unit": "¥"}))
+
+    def test_credit(self):
+        self.assertTrue(panel._is_amount_mode({"unit": "额度"}))
+
+    def test_percent(self):
+        self.assertFalse(panel._is_amount_mode({"unit": "%"}))
+
+    def test_empty(self):
+        self.assertFalse(panel._is_amount_mode({"unit": ""}))
+
+    def test_tokens(self):
+        self.assertFalse(panel._is_amount_mode({"unit": "tokens"}))
+
+    def test_full_yen(self):
+        self.assertTrue(panel._is_amount_mode({"unit": "￥"}))
+
+
+class RowBg(unittest.TestCase):
+    def test_amount_warm_bg(self):
+        self.assertNotEqual(panel._row_bg({"unit": "$"}), panel._row_bg({"unit": "%"}))
+
+
 if __name__ == "__main__":
     unittest.main()

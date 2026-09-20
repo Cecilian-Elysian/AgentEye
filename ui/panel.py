@@ -137,6 +137,33 @@ def _set_detail_with_tags(text_widget, text, fg):
 
     highlight tag 的前景色会被实时重新配置为 fg。
     """
+    text_widget.tag_config("highlight", foreground=fg)
+    text_widget.config(state="normal")
+    text_widget.delete("1.0", "end")
+    pos = 0
+    for m in _DETAIL_NUMBER_RE.finditer(text):
+        if m.start() > pos:
+            text_widget.insert("end", text[pos:m.start()], "dim")
+        text_widget.insert("end", m.group(0), "highlight")
+        pos = m.end()
+    if pos < len(text):
+        text_widget.insert("end", text[pos:], "dim")
+    text_widget.config(state="disabled")
+
+
+def _is_amount_mode(result):
+    """判断一行是否"金额行"(显示 $¥ 而非 %)。
+
+    判定:unit 是 $ / ¥ / 额度 / 元 / ￥ 任一 → 金额行。
+    否则(包括 %、tokens、次、空)→ 额度行。
+    """
+    unit = (result.get("unit") or "").strip()
+    return unit in ("$", "¥", "￥", "额度", "元")
+
+
+def _row_bg(result):
+    """金额行返回金色微调底色,额度行不变。"""
+    return "#1d1b25" if _is_amount_mode(result) else C["card"]
 
 
 def _compute_target_static(rows, y_root):
@@ -151,18 +178,6 @@ def _compute_target_static(rows, y_root):
         if y_root < mid:
             return i
     return len(rows)
-    text_widget.tag_config("highlight", foreground=fg)
-    text_widget.config(state="normal")
-    text_widget.delete("1.0", "end")
-    pos = 0
-    for m in _DETAIL_NUMBER_RE.finditer(text):
-        if m.start() > pos:
-            text_widget.insert("end", text[pos:m.start()], "dim")
-        text_widget.insert("end", m.group(0), "highlight")
-        pos = m.end()
-    if pos < len(text):
-        text_widget.insert("end", text[pos:], "dim")
-    text_widget.config(state="disabled")
 
 
 class Panel:
@@ -350,14 +365,15 @@ class Panel:
                 return
 
     def _drag_press(self, event, name):
-        if event.widget is self._rows.get(name, {}).get("value"):
-            return
+        value_lbl = self._rows.get(name, {}).get("value")
         self._drag = {
             "name": name,
             "start_y": event.y_root,
+            "start_x": event.x_root,
             "active": False,
             "target": None,
             "original_index": None,
+            "is_value_click": event.widget is value_lbl,
         }
 
     def _drag_motion(self, event, name):
@@ -391,6 +407,8 @@ class Panel:
             self._clear_drag_indicator()
             self._commit_drag(name, d["target"])
             self.root.config(cursor="")
+        elif d.get("is_value_click"):
+            self._copy_value(name)
         else:
             self._clear_drag_indicator()
         self._drag = None
@@ -503,7 +521,8 @@ class Panel:
             child.destroy()
         self._rows = {}
         if not results:
-            box = self._row_skeleton("未配置任何 provider", "右键 + 添加 Key")
+            box = self._row_skeleton("未配置任何 provider", "右键 + 添加 Key",
+                                      {"unit": ""})
             box["value"].config(text="-", fg=C["off"])
             return
         order = []
@@ -514,21 +533,26 @@ class Panel:
         ordered = [name_to_result[n] for n in order if n in name_to_result]
         ordered += [r for r in results if r["name"] not in order]
         for r in ordered:
-            self._rows[r["name"]] = self._row_skeleton(r["name"], "")
+            self._rows[r["name"]] = self._row_skeleton(r["name"], "", r)
 
-    def _row_skeleton(self, name, detail):
-        card = tk.Frame(self.rows_frame, bg=C["card"], cursor="hand2")
+    def _row_skeleton(self, name, detail, result=None):
+        result = result or {}
+        bg = _row_bg(result)
+        is_amount = _is_amount_mode(result)
+        card = tk.Frame(self.rows_frame, bg=bg, cursor="hand2")
         card.pack(fill="x", pady=3)
         card._provider_name = name
-        top = tk.Frame(card, bg=C["card"])
+        card._bg = bg
+        top = tk.Frame(card, bg=bg)
         top.pack(fill="x", padx=8, pady=(6, 0))
-        name_lbl = tk.Label(top, text=name, font=(FONT, 9, "bold"),
-                            fg=C["text"], bg=C["card"])
+        prefix = "💰 " if is_amount else ""
+        name_lbl = tk.Label(top, text=prefix + name, font=(FONT, 9, "bold"),
+                            fg=C["text"], bg=bg)
         name_lbl.pack(side="left")
         value_lbl = tk.Label(top, text="…", font=(FONT, 9),
-                             fg=C["dim"], bg=C["card"], cursor="hand2")
+                             fg=C["dim"], bg=bg, cursor="hand2")
         value_lbl.pack(side="right")
-        det_lbl = tk.Text(card, font=(FONT, 9), fg=C["dim"], bg=C["card"],
+        det_lbl = tk.Text(card, font=(FONT, 9), fg=C["dim"], bg=bg,
                           wrap="word", height=1, bd=0, highlightthickness=0,
                           padx=0, pady=2, cursor="arrow", takefocus=0)
         det_lbl.pack(fill="x", padx=8)
@@ -537,25 +561,28 @@ class Panel:
         det_lbl.tag_raise("sel", "dim")
         det_lbl.insert("end", detail or "")
         det_lbl.config(state="disabled")
-        bar = tk.Canvas(card, height=5, bg=C["bar_bg"], highlightthickness=0)
-        bar.pack(fill="x", padx=8, pady=(4, 7))
-        rect = bar.create_rectangle(0, 0, 0, 5, outline="")
+        bar = None
+        rect = None
+        if not is_amount:
+            bar = tk.Canvas(card, height=5, bg=C["bar_bg"], highlightthickness=0)
+            bar.pack(fill="x", padx=8, pady=(4, 7))
+            rect = bar.create_rectangle(0, 0, 0, 5, outline="")
 
         widgets = {"frame": card, "name": name_lbl, "value": value_lbl,
                    "detail": det_lbl, "bar": bar, "rect": rect,
-                   "provider_name": name}
+                   "provider_name": name, "is_amount": is_amount}
 
         for w in (card, top, name_lbl):
             w.bind("<Enter>", lambda e, ww=card: ww.config(bg=C["card_hover"]))
-            w.bind("<Leave>", lambda e, ww=card: ww.config(bg=C["card"]))
-        value_lbl.bind("<Button-1>", lambda e, n=name: self._copy_value(n))
+            w.bind("<Leave>", lambda e, ww=card: ww.config(bg=ww._bg))
         value_lbl.bind("<Enter>", lambda e: value_lbl.config(fg=C["ok"]))
         value_lbl.bind("<Leave>", lambda e: value_lbl.config(fg=C["dim"]))
 
         card.bind("<Button-3>", lambda e, n=name: self._popup_row_menu(e, n))
         name_lbl.bind("<Button-3>", lambda e, n=name: self._popup_row_menu(e, n))
 
-        for w in (card, top, name_lbl, det_lbl, bar):
+        drag_widgets = [w for w in (card, top, name_lbl, det_lbl, bar) if w is not None]
+        for w in drag_widgets:
             w.bind("<Button-1>", lambda e, n=name: self._drag_press(e, n), add="+")
             w.bind("<B1-Motion>", lambda e, n=name: self._drag_motion(e, n), add="+")
             w.bind("<ButtonRelease-1>", lambda e, n=name: self._drag_release(e, n), add="+")
@@ -687,6 +714,8 @@ class Panel:
             frac = max(0.0, min(1.0, float(pct) / 100.0))
         bar = widgets["bar"]
         rect = widgets["rect"]
+        if bar is None or rect is None:
+            return
         width = bar.winfo_width() or 300
         bar.coords(rect, 0, 0, width * (frac if frac is not None else 1.0), 5)
         bar.itemconfig(rect, fill=color)
