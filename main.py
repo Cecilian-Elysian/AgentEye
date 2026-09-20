@@ -104,6 +104,21 @@ def build_actions(root, cfg, state, stop, wake):
         except OSError:
             pass
 
+    def open_settings():
+        from ui.settings_dialog import SettingsDialog
+
+        def _on_save(new_cfg):
+            cfg.clear()
+            cfg.update(new_cfg)
+            config_mod.save_v2(cfg)
+            _apply_settings_live()
+
+        SettingsDialog(root, cfg, on_save=_on_save)
+
+    def _apply_settings_live():
+        """设置保存后即时生效:立即唤醒 poller,新配置下次 fetch 生效。"""
+        wake.set()
+
     def save_position(x, y):
         ui = cfg.setdefault("ui", {})
         ui["x"], ui["y"] = int(x), int(y)
@@ -196,6 +211,7 @@ def build_actions(root, cfg, state, stop, wake):
         "toggle_pause": toggle_pause,
         "test_notify": test_notify,
         "open_config": open_config,
+        "open_settings": open_settings,
         "save_position": save_position,
         "save_size": save_size,
         "save_order": save_order,

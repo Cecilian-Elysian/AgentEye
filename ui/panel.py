@@ -271,6 +271,14 @@ class Panel:
         if self._pinned:
             self.root.attributes("-topmost", True)
 
+        gear_btn = tk.Label(header, text="⚙", font=(FONT, 12),
+                            fg=C["dim"], bg=C["bg"], cursor="hand2")
+        gear_btn.pack(side="right", padx=(0, 4))
+        gear_btn.bind("<Button-1>",
+                      lambda e: self.actions.get("open_settings", lambda: None)())
+        gear_btn.bind("<Enter>", lambda e: gear_btn.config(fg=C["ok"]))
+        gear_btn.bind("<Leave>", lambda e: gear_btn.config(fg=C["dim"]))
+
     def _toggle_pin(self):
         self._pinned = not self._pinned
         self.root.attributes("-topmost", self._pinned)
