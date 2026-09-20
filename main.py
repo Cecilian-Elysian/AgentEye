@@ -2,11 +2,13 @@ import os
 import sys
 import threading
 import time
+import uuid
 
 import config as config_mod
 import notify
 from providers import fetch_all
 from ui import Panel
+from ui.add_key import AddKeyDialog
 
 
 class State:
@@ -34,7 +36,7 @@ class Poller(threading.Thread):
                     self.wake.clear()
                 continue
             self.fetch_once()
-            interval = config_mod.clamp_interval(self.cfg)
+            interval = config_mod.clamp_interval_v2(self.cfg)
             end = time.time() + interval
             self.state.next_fetch = end
             while time.time() < end and not self.stop.is_set():
@@ -73,6 +75,13 @@ class Poller(threading.Thread):
             notify.alert(f"AgentEye · {r['name']}", verb)
 
 
+def _infer_kind_from_dialog(entry):
+    """Add Key 对话框提交后,根据 URL/key 推断 kind。"""
+    from providers import detect as detect_mod
+    r = detect_mod.detect(entry.get("key", ""), entry.get("base_url", ""))
+    return r["kind"]
+
+
 def build_actions(root, cfg, state, stop, wake):
     def refresh_now():
         wake.set()
@@ -95,7 +104,7 @@ def build_actions(root, cfg, state, stop, wake):
     def save_position(x, y):
         ui = cfg.setdefault("ui", {})
         ui["x"], ui["y"] = int(x), int(y)
-        config_mod.save(cfg)
+        config_mod.save_v2(cfg)
 
     def quit_app():
         stop.set()
@@ -105,6 +114,22 @@ def build_actions(root, cfg, state, stop, wake):
         except Exception:
             pass
 
+    def add_key():
+        def _on_save(entry):
+            kind = _infer_kind_from_dialog(entry)
+            new_provider = {
+                "id": uuid.uuid4().hex[:12],
+                "kind": kind,
+                "name": entry.get("name", "未命名"),
+                "key": entry.get("key", ""),
+                "base_url": entry.get("base_url", ""),
+                "extra": {},
+            }
+            cfg.setdefault("providers", []).append(new_provider)
+            config_mod.save_v2(cfg)
+            wake.set()
+        AddKeyDialog(root, on_save=_on_save)
+
     return {
         "refresh_now": refresh_now,
         "toggle_pause": toggle_pause,
@@ -112,18 +137,18 @@ def build_actions(root, cfg, state, stop, wake):
         "open_config": open_config,
         "save_position": save_position,
         "quit": quit_app,
+        "add_key": add_key,
     }
 
 
 def main():
     try:
         import ctypes
-
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except Exception:
         pass
 
-    cfg = config_mod.load()
+    cfg = config_mod.load_v2()
     state = State()
     stop = threading.Event()
     wake = threading.Event()

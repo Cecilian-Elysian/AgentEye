@@ -245,3 +245,35 @@ def merge_v2_defaults(base, user):
         else:
             base[k] = v
     return base
+
+
+def load_v2():
+    """加载 v2 配置:首次运行写模板,v1 自动迁移并备份。"""
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    user_cfg = None
+    if CONFIG_PATH.exists():
+        try:
+            user_cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            user_cfg = None
+
+    if not user_cfg:
+        from_v1 = copy.deepcopy(TEMPLATE)
+        v2 = migrate_v1_to_v2(from_v1)
+        save_v2(v2)
+        return v2
+
+    if user_cfg.get("schema_version") == 2:
+        merged = merge_v2_defaults(copy.deepcopy(V2_TEMPLATE), user_cfg)
+        apply_env_v2(merged)
+        return merged
+
+    backup = CONFIG_PATH.with_suffix(".v1.bak")
+    try:
+        if not backup.exists():
+            atomic_save(backup, user_cfg)
+    except OSError:
+        pass
+    migrated = migrate_v1_to_v2(user_cfg)
+    save_v2(migrated)
+    return migrated
