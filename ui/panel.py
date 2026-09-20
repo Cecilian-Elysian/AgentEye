@@ -257,6 +257,29 @@ class Panel:
         add_btn.bind("<Enter>", lambda e: add_btn.config(fg=C["ok"]))
         add_btn.bind("<Leave>", lambda e: add_btn.config(fg=C["dim"]))
 
+        self._pinned = bool((self.cfg.get("ui") or {}).get("pinned", True))
+        pin_btn = tk.Label(header, text="📌" if self._pinned else "📍",
+                           font=(FONT, 11), bg=C["bg"], cursor="hand2",
+                           fg=C["ok"] if self._pinned else C["dim"])
+        pin_btn.pack(side="right", padx=(0, 4))
+        pin_btn.bind("<Button-1>", lambda e: self._toggle_pin())
+        pin_btn.bind("<Enter>",
+                     lambda e: pin_btn.config(fg=C["ok"] if not self._pinned else C["warn"]))
+        pin_btn.bind("<Leave>",
+                     lambda e: pin_btn.config(fg=C["ok"] if self._pinned else C["dim"]))
+        self.pin_btn = pin_btn
+        if self._pinned:
+            self.root.attributes("-topmost", True)
+
+    def _toggle_pin(self):
+        self._pinned = not self._pinned
+        self.root.attributes("-topmost", self._pinned)
+        self.pin_btn.config(text="📌" if self._pinned else "📍",
+                            fg=C["ok"] if self._pinned else C["dim"])
+        save_pin = self.actions.get("save_pin")
+        if save_pin:
+            save_pin(self._pinned)
+
     def _build_menu(self):
         m = tk.Menu(self.root, tearoff=0)
         m.add_command(label="立即刷新", command=self.actions["refresh_now"])

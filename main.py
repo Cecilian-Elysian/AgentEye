@@ -119,6 +119,11 @@ def build_actions(root, cfg, state, stop, wake):
         ui["order"] = list(order)
         config_mod.save_v2(cfg)
 
+    def save_pin(pinned):
+        ui = cfg.setdefault("ui", {})
+        ui["pinned"] = bool(pinned)
+        config_mod.save_v2(cfg)
+
     def get_order():
         return list((cfg.get("ui") or {}).get("order") or [])
 
@@ -194,6 +199,7 @@ def build_actions(root, cfg, state, stop, wake):
         "save_position": save_position,
         "save_size": save_size,
         "save_order": save_order,
+        "save_pin": save_pin,
         "get_order": get_order,
         "save_model_order": save_model_order,
         "quit": quit_app,
