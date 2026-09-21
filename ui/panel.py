@@ -35,6 +35,8 @@ FIRST_RUN_FLAG = "~/.agenteye/.first_run_done"
 MIN_W, MIN_H = 280, 180
 MAX_W, MAX_H = 800, 900
 RESIZE_GRIP = 16
+BTN_BG = "#2a2a3a"
+BTN_HOVER = "#34344a"
 
 
 def _fmt_main(result):
@@ -191,6 +193,8 @@ class Panel:
         self._rows = {}
         self._last_paint = {}
         self._last_results = []
+        self._minimized = False
+        self._drag_ok = False
 
         root.title("AgentEye")
         root.overrideredirect(True)
@@ -199,8 +203,27 @@ class Panel:
         self._place_initial()
 
         self._build_header()
-        self.rows_frame = tk.Frame(root, bg=C["bg"])
-        self.rows_frame.pack(fill="x", padx=10)
+        self.rows_container = tk.Frame(root, bg=C["bg"])
+        self.rows_container.pack(fill="both", expand=True, padx=(10, 0),
+                                  pady=(0, 0))
+        self.rows_canvas = tk.Canvas(self.rows_container, bg=C["bg"],
+                                     highlightthickness=0, bd=0)
+        self.rows_scroll = tk.Scrollbar(self.rows_container, orient="vertical",
+                                        command=self.rows_canvas.yview)
+        self.rows_frame = tk.Frame(self.rows_canvas, bg=C["bg"])
+        self.rows_frame.bind(
+            "<Configure>",
+            lambda e: self.rows_canvas.configure(
+                scrollregion=self.rows_canvas.bbox("all")),
+        )
+        self._rows_window = self.rows_canvas.create_window(
+            (0, 0), window=self.rows_frame, anchor="nw")
+        self.rows_canvas.configure(yscrollcommand=self.rows_scroll.set)
+        self.rows_canvas.pack(side="left", fill="both", expand=True)
+        self.rows_scroll.pack(side="right", fill="y", padx=(0, 10))
+        self.rows_canvas.bind("<Configure>", self._on_rows_canvas_configure)
+        self.rows_canvas.bind("<Enter>", self._rows_wheel_enter)
+        self.rows_canvas.bind("<Leave>", self._rows_wheel_leave)
         self.footer = tk.Label(
             root, text="", font=(FONT, 8), fg=C["dim"], bg=C["bg"], anchor="w")
         self.footer.pack(fill="x", padx=10, pady=(2, 8))
@@ -213,6 +236,7 @@ class Panel:
 
         self.menu = self._build_menu()
         root.bind("<Button-3>", self._popup_main_menu)
+        root.bind("<Map>", self._on_map)
         root.bind("<F5>", lambda e: actions["refresh_now"]())
         root.bind("<Control-q>", lambda e: actions["quit"]())
         root.bind("<Escape>", lambda e: self._close_any_popup())
@@ -235,6 +259,20 @@ class Panel:
         self.root.minsize(MIN_W, MIN_H)
         self.root.maxsize(MAX_W, MAX_H)
 
+    def _make_hdr_btn(self, parent, text, fg=None, hover_fg=None, size=10):
+        """Header 统一按钮:flat + #2a2a3a 底,与设置对话框按钮同风格。"""
+        base_fg = fg or C["text"]
+        btn = tk.Button(parent, text=text, font=(FONT, size),
+                        bg=BTN_BG, fg=base_fg, relief="flat", bd=0,
+                        activebackground=BTN_HOVER, activeforeground=hover_fg or base_fg,
+                        highlightthickness=0, takefocus=0, cursor="hand2",
+                        padx=7, pady=0, width=1)
+        btn._fg = base_fg
+        btn._hover_fg = hover_fg or base_fg
+        btn.bind("<Enter>", lambda e: btn.config(bg=BTN_HOVER, fg=btn._hover_fg))
+        btn.bind("<Leave>", lambda e: btn.config(bg=BTN_BG, fg=btn._fg))
+        return btn
+
     def _build_header(self):
         header = tk.Frame(self.root, bg=C["bg"])
         header.pack(fill="x", padx=10, pady=(8, 2))
@@ -243,47 +281,55 @@ class Panel:
         self.dot = tk.Label(header, text="●", font=(FONT, 9),
                             fg=C["dim"], bg=C["bg"])
         self.dot.pack(side="right", padx=(0, 8))
-        close = tk.Label(header, text="×", font=(FONT, 12),
-                         fg=C["dim"], bg=C["bg"], cursor="hand2")
-        close.pack(side="right")
-        close.bind("<Button-1>", lambda e: self.actions["quit"]())
-        close.bind("<Enter>", lambda e: close.config(fg=C["critical"]))
-        close.bind("<Leave>", lambda e: close.config(fg=C["dim"]))
 
-        add_btn = tk.Label(header, text="+", font=(FONT, 12, "bold"),
-                           fg=C["dim"], bg=C["bg"], cursor="hand2")
-        add_btn.pack(side="right", padx=(0, 4))
-        add_btn.bind("<Button-1>", lambda e: self.actions.get("add_key", lambda: None)())
-        add_btn.bind("<Enter>", lambda e: add_btn.config(fg=C["ok"]))
-        add_btn.bind("<Leave>", lambda e: add_btn.config(fg=C["dim"]))
+        close = self._make_hdr_btn(header, "×", fg=C["dim"], hover_fg=C["critical"])
+        close.pack(side="right")
+        close.config(command=self.actions["quit"])
+
+        min_btn = self._make_hdr_btn(header, "–", fg=C["dim"], hover_fg=C["text"])
+        min_btn.pack(side="right", padx=(0, 4))
+        min_btn.config(command=self._minimize)
 
         self._pinned = bool((self.cfg.get("ui") or {}).get("pinned", True))
-        pin_btn = tk.Label(header, text="📌" if self._pinned else "📍",
-                           font=(FONT, 11), bg=C["bg"], cursor="hand2",
-                           fg=C["ok"] if self._pinned else C["dim"])
-        pin_btn.pack(side="right", padx=(0, 4))
-        pin_btn.bind("<Button-1>", lambda e: self._toggle_pin())
-        pin_btn.bind("<Enter>",
-                     lambda e: pin_btn.config(fg=C["ok"] if not self._pinned else C["warn"]))
-        pin_btn.bind("<Leave>",
-                     lambda e: pin_btn.config(fg=C["ok"] if self._pinned else C["dim"]))
-        self.pin_btn = pin_btn
+        self.pin_btn = self._make_hdr_btn(header, "⊙" if self._pinned else "○",
+                                          fg=C["ok"] if self._pinned else C["dim"],
+                                          hover_fg=C["warn"] if self._pinned else C["ok"])
+        self.pin_btn.pack(side="right", padx=(0, 4))
+        self.pin_btn.config(command=self._toggle_pin)
         if self._pinned:
             self.root.attributes("-topmost", True)
 
-        gear_btn = tk.Label(header, text="⚙", font=(FONT, 12),
-                            fg=C["dim"], bg=C["bg"], cursor="hand2")
+        gear_btn = self._make_hdr_btn(header, "≡", fg=C["dim"], hover_fg=C["text"])
         gear_btn.pack(side="right", padx=(0, 4))
-        gear_btn.bind("<Button-1>",
-                      lambda e: self.actions.get("open_settings", lambda: None)())
-        gear_btn.bind("<Enter>", lambda e: gear_btn.config(fg=C["ok"]))
-        gear_btn.bind("<Leave>", lambda e: gear_btn.config(fg=C["dim"]))
+        gear_btn.config(command=lambda: self.actions.get("open_settings", lambda: None)())
+        self.gear_btn = gear_btn
+
+    def _minimize(self):
+        """overrideredirect 窗口最小化:临时恢复装饰 iconify,还原时重新隐藏边框。"""
+        self._minimized = True
+        try:
+            self.root.overrideredirect(False)
+            self.root.iconify()
+        except tk.TclError:
+            self._minimized = False
+
+    def _on_map(self, event):
+        if event.widget is not self.root or not getattr(self, "_minimized", False):
+            return
+        self._minimized = False
+        try:
+            self.root.overrideredirect(True)
+            self.root.attributes("-topmost", self._pinned)
+        except tk.TclError:
+            pass
 
     def _toggle_pin(self):
         self._pinned = not self._pinned
         self.root.attributes("-topmost", self._pinned)
-        self.pin_btn.config(text="📌" if self._pinned else "📍",
-                            fg=C["ok"] if self._pinned else C["dim"])
+        fg = C["ok"] if self._pinned else C["dim"]
+        self.pin_btn.config(text="⊙" if self._pinned else "○", fg=fg)
+        self.pin_btn._fg = fg
+        self.pin_btn._hover_fg = C["warn"] if self._pinned else C["ok"]
         save_pin = self.actions.get("save_pin")
         if save_pin:
             save_pin(self._pinned)
@@ -312,12 +358,33 @@ class Panel:
             finally:
                 self.menu.grab_release()
 
+    def _is_window_drag_target(self, widget):
+        """root 绑定对所有子控件生效;交互控件按下时不启动窗口拖动。
+
+        - resize grip(含内部圆点): 交给 _resize_* 处理
+        - provider 行卡片: 交给行拖拽重排/复制逻辑
+        - Header 按钮(tk.Button): 交给自身 command
+        """
+        w = widget
+        while w is not None:
+            if w is self._resize_grip or getattr(w, "_provider_name", None):
+                return False
+            if w.winfo_class() == "Button":
+                return False
+            w = getattr(w, "master", None)
+        return True
+
     def _drag_start(self, event):
+        self._drag_ok = self._is_window_drag_target(event.widget)
+        if not self._drag_ok:
+            return
         self._ox = event.x_root - self.root.winfo_x()
         self._oy = event.y_root - self.root.winfo_y()
         self.root.config(cursor="fleur")
 
     def _drag_move(self, event):
+        if not self._drag_ok:
+            return
         x = event.x_root - self._ox
         y = event.y_root - self._oy
         sw = self.root.winfo_screenwidth()
@@ -333,6 +400,9 @@ class Panel:
         self.root.geometry(f"+{x}+{y}")
 
     def _drag_end(self, event):
+        if not self._drag_ok:
+            return
+        self._drag_ok = False
         self.root.config(cursor="")
         self.actions["save_position"](
             self.root.winfo_x(), self.root.winfo_y())
@@ -395,6 +465,31 @@ class Panel:
                 w.destroy()
                 return
 
+    def _on_rows_canvas_configure(self, event):
+        try:
+            self.rows_canvas.itemconfig(self._rows_window, width=event.width)
+        except tk.TclError:
+            pass
+
+    def _on_rows_wheel(self, event):
+        try:
+            delta = int(-1 * (event.delta / 120))
+            self.rows_canvas.yview_scroll(delta, "units")
+        except tk.TclError:
+            pass
+
+    def _rows_wheel_enter(self, event):
+        try:
+            self.rows_canvas.bind_all("<MouseWheel>", self._on_rows_wheel)
+        except tk.TclError:
+            pass
+
+    def _rows_wheel_leave(self, event):
+        try:
+            self.rows_canvas.unbind_all("<MouseWheel>")
+        except tk.TclError:
+            pass
+
     def _drag_press(self, event, name):
         value_lbl = self._rows.get(name, {}).get("value")
         self._drag = {
@@ -412,7 +507,7 @@ class Panel:
         if not d or d["name"] != name:
             return
         if not d["active"]:
-            if abs(event.y_root - d["start_y"]) <= 5:
+            if abs(event.y_root - d["start_y"]) <= 8:
                 return
             d["active"] = True
             widgets = self._rows.get(name)
@@ -551,6 +646,7 @@ class Panel:
         for child in self.rows_frame.winfo_children():
             child.destroy()
         self._rows = {}
+        self._last_paint = {}
         if not results:
             box = self._row_skeleton("未配置任何 provider", "右键 + 添加 Key",
                                       {"unit": ""})
@@ -649,6 +745,7 @@ class Panel:
                 on_probe=lambda: self.actions.get("probe_models", lambda n: None)(
                     self._popup_target_name),
             )
+        self._row_menu_inst.set_target(name)
         try:
             self._row_menu_inst.menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -707,7 +804,8 @@ class Panel:
             if save_model_order:
                 save_model_order(name, base_url, key, new_order)
         ModelPanel(self.root, name, models, on_probe=_probe_cb,
-                   on_reorder=_on_reorder)
+                   on_reorder=_on_reorder,
+                   on_after_reorder=lambda: self.actions["refresh_now"]())
 
     def _paint_row(self, widgets, r):
         ratio_val = _usage_ratio(r)

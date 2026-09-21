@@ -86,8 +86,17 @@ def _infer_kind_from_dialog(entry):
 
 
 def build_actions(root, cfg, state, stop, wake):
+    actions = {}
+
     def refresh_now():
+        state.fetching = True
         wake.set()
+        flash = actions.get("flash_refresh")
+        if flash:
+            try:
+                flash()
+            except Exception:
+                pass
 
     def toggle_pause():
         state.paused = not state.paused
@@ -113,7 +122,8 @@ def build_actions(root, cfg, state, stop, wake):
             config_mod.save_v2(cfg)
             _apply_settings_live()
 
-        SettingsDialog(root, cfg, on_save=_on_save)
+        SettingsDialog(root, cfg, on_save=_on_save, on_add_key=add_key,
+                       current_count=len(cfg.get("providers") or []))
 
     def _apply_settings_live():
         """设置保存后即时生效:立即唤醒 poller,新配置下次 fetch 生效。"""
@@ -181,6 +191,29 @@ def build_actions(root, cfg, state, stop, wake):
         count = len(cfg.get("providers") or [])
         AddKeyDialog(root, on_save=_on_save, current_count=count)
 
+    def delete_provider(name):
+        providers = cfg.get("providers") or []
+        target = next((p for p in providers if p.get("name") == name), None)
+        if not target:
+            return
+        base_url = target.get("base_url") or ""
+        key = target.get("key") or ""
+        cfg["providers"] = [p for p in providers if p.get("name") != name]
+        config_mod.save_v2(cfg)
+        try:
+            import cache as cache_mod
+            if base_url and key:
+                cache_mod.remove_provider_entries(base_url, key)
+            cache_mod.log_provider_deleted(name, base_url=base_url)
+        except Exception:
+            pass
+        try:
+            import notify as notify_mod
+            notify_mod.alert("AgentEye", f"已删除:{name}")
+        except Exception:
+            pass
+        wake.set()
+
     def probe_model(model_id, base_url, key, timeout=10.0):
         """1-token 试调:返回 (ok, latency_ms, error) 三元组。"""
         import requests
@@ -226,6 +259,7 @@ def build_actions(root, cfg, state, stop, wake):
         "save_model_order": save_model_order,
         "quit": quit_app,
         "add_key": add_key,
+        "delete_provider": delete_provider,
         "probe_model": probe_model,
     }
 

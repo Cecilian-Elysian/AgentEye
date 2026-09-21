@@ -118,6 +118,31 @@ def log_probe(provider_name, model_id, success, latency_ms, error=""):
         f.write(json.dumps(line, ensure_ascii=False) + "\n")
 
 
+def remove_provider_entries(base_url, api_key):
+    """从 models.json 删除该 (base_url, key) 的条目(列表 + 排序)。"""
+    _ensure()
+    cache = _load_json(MODELS_CACHE)
+    key = _hash(base_url or "", api_key or "")
+    if key in cache:
+        cache.pop(key, None)
+        _save_json(MODELS_CACHE, cache)
+        return True
+    return False
+
+
+def log_provider_deleted(provider_name, base_url=""):
+    """probe 日志只追加,不删历史。"""
+    _ensure()
+    line = {
+        "ts": time.time(),
+        "event": "provider_deleted",
+        "provider": provider_name,
+        "base_url": base_url or "",
+    }
+    with PROBE_LOG.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(line, ensure_ascii=False) + "\n")
+
+
 def recent_probes(provider_name=None, limit=20):
     _ensure()
     if not PROBE_LOG.exists():

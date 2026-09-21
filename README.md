@@ -10,10 +10,13 @@
 - **金额/额度双视图**:金额行($ ¥ 额度)无进度条 + 💰 前缀 + 暖色底;百分比行带渐变进度条
 - **消耗渐变色**:绿→黄→红三色插值,基于 used_today/total 计算消耗比,detail 中所有金额/百分比同步上色
 - **窗口可拖拽 resize**:右下角 grip 调整面板大小(280×180 ~ 800×900),实时自适应 wraplength
-- **主面板 + 模型面板 拖拽重排**:长按 >5px 触发,红线指示器,顺序持久化到 cfg 和 cache
-- **窗口固定按钮**:Header 📌/📍 切换 topmost,状态持久化
-- **设置界面**:Header ⚙ 打开,改刷新间隔、告警/临界阈值(双币种独立)、月度预算、汇率
-- **模型列表自动拉取**:每个 provider 显示 `/v1/models` 列表,按能力分组(Claude/GPT/Gemini/...),支持搜索
+- **主面板 + 模型面板 拖拽重排**:长按 >8px 触发,红线指示器,顺序持久化到 cfg 和 cache;模型面板拖完后自动触发一次额度刷新
+- **窗口固定按钮**:Header ⊙/○ 切换 topmost,状态持久化
+- **最小化按钮**:Header – 最小化到任务栏,点击任务栏还原(自动恢复无边框+置顶状态)
+- **Header 按钮风格统一**:≡ ⊙ – × 全部为 flat 深色按钮(#2a2a3a,等宽 width=1),hover 高亮
+- **设置界面**:Header ≡ 打开,改刷新间隔、告警/临界阈值(双币种独立)、月度预算、汇率;**同页含添加 Key 表单**(5 预设 + 自动探测 + 连续添加)
+- **删除确认**:右键删除 provider 需输入名字确认,同时清理 models 缓存并在 probe 日志追加删除标记
+- **模型列表自动拉取**:每个 provider 显示 `/v1/models` 列表,按能力分组(Claude/GPT/Gemini/...),支持搜索(计数实时更新,拖动不跳滚动位)
 - **1-token 试调**:点击"试调"发送 1 token 请求,显示延迟,记录到 `~/.agenteye/cache/probe.jsonl`
 - **金额今日已用/总额**:中转站显示 `今日 $X.XX / $Y.YY`,百分比行继续显示 5h%/周%/倒计时
 - **价格计算器**:模型详情面板估算 N 次调用的花费(常见模型公开价表)
@@ -77,15 +80,16 @@ python main.py   前台运行便于看报错
 
 ## 窗口操作
 
-- **拖动**:按住任意位置拖,自动边缘磁吸(< 20px 贴边)
-- **拖拽重排行**:按住行任何位置超过 5px 进入拖拽模式,出现红色指示线,松开释放
+- **拖动**:按住空白处(标题/底部/行间空隙)拖,自动边缘磁吸(< 20px 贴边);行内按下拖动是重排,不会移动窗口
+- **拖拽重排行**:按住行任何位置超过 8px 进入拖拽模式,出现红色指示线,松开释放
+- **主面板滚动条**:窗口缩小或 provider 多时,右侧滚动条 + 滚轮上下滚动查看
 - **调整大小**:右下角 grip(`size_nw_se` 光标)拖动改变面板大小,内部自适应
-- **光标**:拖动时 `fleur`,行 hover `hand2`,× 按钮 hover 变红,+ 按钮 hover 变绿
+- **光标**:拖动时 `fleur`,行 hover `hand2`,× 按钮 hover 变红
 - **点击数值**:无移动 → 复制到剪贴板;有移动 → 拖拽重排
-- **右键行**:刷新此行 / 查看模型 / 试调 / 编辑 / 暂停 / 复制 key / 复制 URL / 删除
-- **点击 + 按钮**:打开 Add Key 对话框
-- **点击 📌 按钮**:切换窗口固定(topmost),📌 = 固定,📍 = 不固定
-- **点击 ⚙ 按钮**:打开设置界面(刷新间隔 / 告警阈值 / 月度预算 / 汇率)
+- **右键行**:刷新此行 / 查看模型 / 试调 / 编辑 / 暂停 / 复制 key / 复制 URL / 删除(删除需输入名字确认)
+- **点击 ≡ 按钮**:打开设置界面(刷新间隔 / 告警阈值 / 月度预算 / 汇率 / 同页添加 Key)
+- **点击 ⊙/○ 按钮**:切换窗口固定(topmost),⊙ = 固定,○ = 不固定
+- **点击 – 按钮**:最小化到任务栏,点击任务栏图标还原
 - **右键菜单**:立即刷新 / 通知测试 / 添加 Key / 暂停 / 打开配置 / 退出
 - **键盘**: F5 刷新, Ctrl+Q 退出, Esc 关闭弹窗, 窗口聚焦时自动刷新
 
@@ -116,7 +120,7 @@ python main.py   前台运行便于看报错
 python -m unittest discover tests
 ```
 
-当前 111 测试用例覆盖 detect / generic / cache / migration / aggregate / panel 渐变 / 金额行模式 / 拖拽重排 / 设置校验 / AddKey placeholder。
+当前 142 测试用例覆盖 detect / generic / cache(含 provider 删除清理)/ migration / aggregate / panel 渐变 / 金额行模式 / 拖拽重排 / 设置校验 / AddKey placeholder / 滚动条结构 / 删除确认 / 模型面板分组与重排回调 / 重建后重绘回归。
 
 ## 已知边界
 
@@ -139,8 +143,9 @@ providers/
   generic.py        OpenAI 兼容探测 + 4 种 quota parser
   relay.py / minimax.py / opencode_go.py / deepseek.py / zhipu.py   5 内置 provider
 ui/
-  panel.py          主面板:provider 行 + 拖拽/拖动/resize
-  row_menu.py       行右键菜单
+  panel.py          主面板:provider 行 + 滚动条 + 拖拽/拖动/resize
+  row_menu.py       行右键菜单(删除走输入名字确认)
+  confirm_delete.py 危险操作确认:输入名字才能确认
   model_panel.py    模型列表 + 拖拽重排 + 搜索 + 分组 + 试调 + 价格计算
   aggregate_detail.py   聚合明细弹窗
   add_key.py        Add Key 对话框:5 预设 + placeholder + 预览

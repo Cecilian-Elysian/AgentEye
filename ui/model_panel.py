@@ -20,7 +20,7 @@ class ModelPanel(tk.Toplevel):
     ]
 
     def __init__(self, parent, provider_name, models, on_probe=None,
-                 on_reorder=None):
+                 on_reorder=None, on_after_reorder=None):
         super().__init__(parent)
         self.title(f"{provider_name} · 模型列表")
         self.configure(bg="#1d1d2b")
@@ -31,6 +31,7 @@ class ModelPanel(tk.Toplevel):
         self.filtered = list(self.models)
         self.on_probe = on_probe
         self.on_reorder = on_reorder
+        self.on_after_reorder = on_after_reorder
         self._drag = None
 
         BG = "#1d1d2b"
@@ -40,7 +41,8 @@ class ModelPanel(tk.Toplevel):
 
         top = tk.Frame(self, bg=BG)
         top.pack(fill="x", padx=12, pady=(12, 6))
-        tk.Label(top, text=f"{len(self.models)} 个模型",
+        self.count_var = tk.StringVar(value=f"{len(self.models)} 个模型")
+        tk.Label(top, textvariable=self.count_var,
                  bg=BG, fg=DIM, font=FONT).pack(side="left")
 
         search_frame = tk.Frame(self, bg=BG)
@@ -56,6 +58,7 @@ class ModelPanel(tk.Toplevel):
         tk.Label(calc_frame, text="估算调用", bg=BG, fg=DIM,
                  font=(FONT, 9)).pack(side="left")
         self.calc_n_var = tk.StringVar(value="100")
+        self.calc_n_var.trace_add("write", lambda *a: self._on_calc_change())
         tk.Entry(calc_frame, textvariable=self.calc_n_var, width=6,
                  bg="#15151d", fg=FG, insertbackground=FG,
                  font=(FONT, 9), relief="flat").pack(side="left", padx=(4, 2))
@@ -76,13 +79,14 @@ class ModelPanel(tk.Toplevel):
         self.inner.bind("<Configure>",
                         lambda e: self.canvas.configure(
                             scrollregion=self.canvas.bbox("all")))
-        self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self._list_window = self.canvas.create_window(
+            (0, 0), window=self.inner, anchor="nw")
         self.canvas.configure(yscrollcommand=self.scroll.set)
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scroll.pack(side="right", fill="y")
-        self.canvas.bind_all("<MouseWheel>",
-                             lambda e: self.canvas.yview_scroll(
-                                 int(-1 * (e.delta / 120)), "units"))
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+        self.canvas.bind("<Enter>", self._wheel_enter)
+        self.canvas.bind("<Leave>", self._wheel_leave)
 
         tk.Button(self, text="关闭", command=self.destroy,
                   bg="#2a2a3a", fg=FG, relief="flat", font=FONT,
@@ -95,6 +99,7 @@ class ModelPanel(tk.Toplevel):
         self.geometry(f"+{max(0, x)}+{max(0, y)}")
         self.grab_set()
         self.focus_set()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._render()
 
@@ -104,6 +109,9 @@ class ModelPanel(tk.Toplevel):
             self.filtered = list(self.models)
         else:
             self.filtered = [m for m in self.models if q in m.lower()]
+        if hasattr(self, "count_var"):
+            self.count_var.set(
+                f"{len(self.filtered)} / {len(self.models)} 个模型")
         self._render()
 
     def _group(self, model_id):
@@ -114,12 +122,22 @@ class ModelPanel(tk.Toplevel):
         return "其他"
 
     def _render(self):
+        try:
+            scroll_pos = self.canvas.yview()[0]
+        except (tk.TclError, AttributeError, IndexError):
+            scroll_pos = 0.0
+
         for w in self.inner.winfo_children():
             w.destroy()
 
         if not self.filtered:
             tk.Label(self.inner, text="(无匹配)", bg="#1d1d2b",
                      fg="#8b8b9e", font=("Microsoft YaHei UI", 10)).pack(pady=20)
+            try:
+                self.canvas.update_idletasks()
+                self.canvas.yview_moveto(0.0)
+            except tk.TclError:
+                pass
             return
 
         grouped = {}
@@ -144,13 +162,19 @@ class ModelPanel(tk.Toplevel):
                 tk.Label(row, text=m, bg="#15151d", fg=FG,
                          font=FONT, anchor="w").pack(side="left", padx=8, pady=4)
                 if self.on_probe:
+                    self.probe_result_var = tk.StringVar(value="")
+                    tk.Label(row, textvariable=self.probe_result_var,
+                             bg="#15151d", fg=DIM, font=(FONT[0], 8),
+                             width=12, anchor="e").pack(
+                        side="right", padx=4)
                     tk.Button(row, text="试调", font=(FONT[0], 8),
                               bg="#2a2a3a", fg=FG, relief="flat",
                               command=lambda model=m: self._probe(model)).pack(
                         side="right", padx=4, pady=2)
-                select_btn = tk.Label(row, text="选", font=(FONT[0], 8),
+                select_btn = tk.Label(row, text="估算", font=(FONT[0], 8),
                                       bg="#2a2a3a", fg=FG, cursor="hand2")
                 select_btn.pack(side="right", padx=(0, 4), pady=2)
+                self._attach_tooltip(select_btn, "用于上方估算调用成本")
                 select_btn.bind("<Button-1>", lambda e, model=m: self._select_model(model))
 
                 for child in row.winfo_children():
@@ -161,12 +185,18 @@ class ModelPanel(tk.Toplevel):
                 row.bind("<B1-Motion>", lambda e, mid=m: self._drag_motion(e, mid), add="+")
                 row.bind("<ButtonRelease-1>", lambda e, mid=m: self._drag_release(e, mid), add="+")
 
+        try:
+            self.canvas.update_idletasks()
+            self.canvas.yview_moveto(scroll_pos)
+        except tk.TclError:
+            pass
+
     def _drag_press(self, event, mid):
         w = event.widget
         if isinstance(w, tk.Button):
             return
         try:
-            if w.cget("text") == "选":
+            if w.cget("text") in ("估算", "试调"):
                 return
         except (tk.TclError, AttributeError):
             pass
@@ -180,7 +210,7 @@ class ModelPanel(tk.Toplevel):
         if not d or d["mid"] != mid:
             return
         if not d["active"]:
-            if abs(event.y_root - d["start_y"]) <= 5:
+            if abs(event.y_root - d["start_y"]) <= 8:
                 return
             d["active"] = True
             d["target"] = self._model_target_index(mid, event.y_root)
@@ -252,6 +282,11 @@ class ModelPanel(tk.Toplevel):
                 self.on_reorder(list(self.models))
             except Exception:
                 pass
+        if self.on_after_reorder:
+            try:
+                self.on_after_reorder()
+            except Exception:
+                pass
         self._render()
 
     def _probe(self, model):
@@ -261,11 +296,13 @@ class ModelPanel(tk.Toplevel):
                          daemon=True).start()
 
     def _select_model(self, model):
+        self._last_selected = model
         self.calc_cost_var.set(_estimate_cost(model, self.calc_n_var.get()))
 
     def _on_calc_change(self):
-        if hasattr(self, "_last_selected") and self._last_selected:
-            self.calc_cost_var.set(_estimate_cost(self._last_selected, self.calc_n_var.get()))
+        sel = getattr(self, "_last_selected", None)
+        if sel:
+            self.calc_cost_var.set(_estimate_cost(sel, self.calc_n_var.get()))
 
     def _probe_worker(self, model):
         try:
@@ -275,9 +312,95 @@ class ModelPanel(tk.Toplevel):
         self.after(0, self._probe_done, model, ok, latency_ms, error)
 
     def _probe_done(self, model, ok, latency_ms, error):
-        msg = f"{'✓' if ok else '✗'} {model}"
-        msg += f"  {latency_ms:.0f}ms" if ok else f"  {error}"
-        print(msg)
+        msg = f"{'✓' if ok else '✗'} {latency_ms:.0f}ms" if ok else f"{'✗'} {error}"
+        var = getattr(self, "probe_result_var", None)
+        if var is not None:
+            var.set(msg)
+            self.after(3000, lambda: self._clear_probe_result()
+                       if var.get() == msg else None)
+        print(f"{'✓' if ok else '✗'} {model}  {latency_ms:.0f}ms" if ok
+              else f"{'✗'} {model}  {error}")
+
+    def _clear_probe_result(self):
+        if hasattr(self, "probe_result_var"):
+            try:
+                self.probe_result_var.set("")
+            except tk.TclError:
+                pass
+
+    def _on_canvas_configure(self, event):
+        try:
+            self.canvas.itemconfig(self._list_window, width=event.width)
+        except tk.TclError:
+            pass
+
+    def _on_wheel(self, event):
+        try:
+            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        except tk.TclError:
+            pass
+
+    def _wheel_enter(self, event):
+        try:
+            self.canvas.bind_all("<MouseWheel>", self._on_wheel)
+        except tk.TclError:
+            pass
+
+    def _wheel_leave(self, event):
+        try:
+            self.canvas.unbind_all("<MouseWheel>")
+        except tk.TclError:
+            pass
+
+    def _on_close(self):
+        try:
+            self.canvas.unbind_all("<MouseWheel>")
+        except tk.TclError:
+            pass
+        self.destroy()
+
+    def _attach_tooltip(self, widget, text, delay_ms=600):
+        tip = {"win": None, "after_id": None}
+
+        def _show():
+            if tip["win"] is not None:
+                return
+            try:
+                x = widget.winfo_rootx() + 20
+                y = widget.winfo_rooty() + widget.winfo_height() + 4
+            except tk.TclError:
+                return
+            win = tk.Toplevel(self)
+            win.wm_overrideredirect(True)
+            win.wm_geometry(f"+{x}+{y}")
+            tk.Label(win, text=text, bg="#2a2a3a", fg="#e8e8f0",
+                     font=("Microsoft YaHei UI", 9), padx=8, pady=3,
+                     relief="flat").pack()
+            tip["win"] = win
+
+        def _hide():
+            if tip["after_id"]:
+                try:
+                    self.after_cancel(tip["after_id"])
+                except tk.TclError:
+                    pass
+                tip["after_id"] = None
+            if tip["win"] is not None:
+                try:
+                    tip["win"].destroy()
+                except tk.TclError:
+                    pass
+                tip["win"] = None
+
+        def _on_enter(e):
+            tip["after_id"] = self.after(delay_ms, _show)
+
+        def _on_leave(e):
+            _hide()
+
+        widget.bind("<Enter>", _on_enter, add="+")
+        widget.bind("<Leave>", _on_leave, add="+")
+        widget.bind("<Button-1>", _hide, add="+")
 
 
 # 常见模型公开价(USD per 1M tokens),粗略。生产环境应从 provider /pricing 端点拉。
