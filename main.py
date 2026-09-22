@@ -6,6 +6,7 @@ import uuid
 
 import config as config_mod
 import notify
+import cache as cache_mod
 from providers import fetch_all
 from ui import Panel
 from ui.add_key import AddKeyDialog
@@ -28,7 +29,7 @@ class Poller(threading.Thread):
         self.stop = stop_event
         self.wake = wake_event
         self.notified = {}
-        self._last_global_alert_ts = 0.0
+        self._last_global_alert_ts = cache_mod.load_alert_state()
 
     def run(self):
         while not self.stop.is_set():
@@ -78,6 +79,10 @@ class Poller(threading.Thread):
             items.append((r["name"], verb))
         if items and max_per_hour > 0 and now - self._last_global_alert_ts >= max_per_hour:
             self._last_global_alert_ts = now
+            try:
+                cache_mod.save_alert_state(now)
+            except Exception:
+                pass
             notify.alert_many(items)
 
 

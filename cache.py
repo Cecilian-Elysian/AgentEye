@@ -12,6 +12,7 @@ from pathlib import Path
 CACHE_DIR = Path.home() / ".agenteye" / "cache"
 MODELS_CACHE = CACHE_DIR / "models.json"
 PROBE_LOG = CACHE_DIR / "probe.jsonl"
+ALERT_STATE = CACHE_DIR / "alert_state.json"
 
 DEFAULT_TTL = {
     "models": 6 * 3600,
@@ -116,6 +117,29 @@ def log_probe(provider_name, model_id, success, latency_ms, error=""):
     }
     with PROBE_LOG.open("a", encoding="utf-8") as f:
         f.write(json.dumps(line, ensure_ascii=False) + "\n")
+
+
+def load_alert_state():
+    """加载持久化的告警节流状态(全局最近一次弹告警的 epoch 秒)。
+
+    文件不存在或损坏时返回 0.0,等同于冷启动。
+    """
+    data = _load_json(ALERT_STATE)
+    try:
+        ts = float(data.get("last_global_alert_ts", 0.0))
+    except (TypeError, ValueError):
+        ts = 0.0
+    return max(0.0, ts)
+
+
+def save_alert_state(last_global_alert_ts):
+    """原子保存全局告警时间戳,保证重启后 1h 闸门不归零。"""
+    _ensure()
+    try:
+        ts = float(last_global_alert_ts)
+    except (TypeError, ValueError):
+        ts = 0.0
+    _save_json(ALERT_STATE, {"last_global_alert_ts": ts})
 
 
 def remove_provider_entries(base_url, api_key):
