@@ -6,7 +6,8 @@
     "critical_pct": 10,
     "warn_amount": 10,
     "critical_amount": 3,
-    "cooldown_min": 60
+    "cooldown_min": 60,
+    "max_per_hour": 60
   },
   "ui": { "x": null, "y": null },
   "relay_sites": [

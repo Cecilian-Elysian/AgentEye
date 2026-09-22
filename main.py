@@ -28,6 +28,7 @@ class Poller(threading.Thread):
         self.stop = stop_event
         self.wake = wake_event
         self.notified = {}
+        self._last_global_alert_ts = 0.0
 
     def run(self):
         while not self.stop.is_set():
@@ -61,6 +62,7 @@ class Poller(threading.Thread):
         if not alert_cfg.get("enable", True):
             return
         cooldown = float(alert_cfg.get("cooldown_min", 60)) * 60
+        max_per_hour = float(alert_cfg.get("max_per_hour", 60)) * 60
         now = time.time()
         items = []
         for r in results:
@@ -74,7 +76,8 @@ class Poller(threading.Thread):
             self.notified[key] = (level, now)
             verb = "额度告急" if level == "critical" else "额度偏低"
             items.append((r["name"], verb))
-        if items:
+        if items and max_per_hour > 0 and now - self._last_global_alert_ts >= max_per_hour:
+            self._last_global_alert_ts = now
             notify.alert_many(items)
 
 

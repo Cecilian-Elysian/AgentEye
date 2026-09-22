@@ -12,8 +12,9 @@
     │  [MiniMax][DeepSeek][智谱][OpenCode][中转]│
     │  Base URL  [____]    │
     │  API Key   [____]    │
+    │  默认模型  [____]    │ ← 必填,触发 1-token 试调
     │  名称      [____]    │
-    │  [预览]              │
+    │  [预览: 类型/置信度/URL/模型数/默认模型 ✓/✗] │
     │        [取消] [保存] │
     └──────────────────────┘
 """
@@ -24,6 +25,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 from providers import detect as detect_mod
+from ui.presets import PRESETS, PRETTY_NAMES
 
 
 FONT = "Microsoft YaHei UI"
@@ -36,15 +38,6 @@ CRITICAL = "#ff5d5d"
 BTN_BG = "#2a2a3a"
 
 
-PRESETS = [
-    ("MiniMax",    "minimax",     "https://api.minimaxi.com"),
-    ("DeepSeek",   "deepseek",    "https://api.deepseek.com"),
-    ("智谱 GLM",   "zhipu",       "https://open.bigmodel.cn"),
-    ("OpenCode",   "opencode_go", "https://opencode.ai"),
-    ("中转站",     "relay",       ""),
-]
-
-
 class SettingsDialog(tk.Toplevel):
     INTERVAL_MIN, INTERVAL_MAX = 15, 3600
     PCT_MIN, PCT_MAX = 1, 99
@@ -54,7 +47,7 @@ class SettingsDialog(tk.Toplevel):
     PROBE_TIMEOUT = 8.0
 
     def __init__(self, parent, cfg, on_save=None, on_add_key=None,
-                 generic_probe=None, current_count=0):
+                 generic_probe=None, probe_model=None, current_count=0):
         super().__init__(parent)
         self.title("设置")
         self.configure(bg=BG)
@@ -65,8 +58,16 @@ class SettingsDialog(tk.Toplevel):
         self._on_save = on_save
         self._on_add_key = on_add_key
         self._generic_probe = generic_probe or (lambda *a, **k: None)
+        self._probe_model = probe_model or (lambda *a, **k: None)
         self._current_count = current_count
         self._probe_thread = None
+        self._model_probe_thread = None
+        self._model_probe_result = None
+        self._model_probe_elapsed = 0.0
+        self._probe_started_at = 0.0
+        self._model_probe_started_at = 0.0
+        self._add_model_autofilled = False
+        self._probe_elapsed = 0.0
 
         self._build_ui()
         self._bind_shortcuts()
@@ -104,6 +105,9 @@ class SettingsDialog(tk.Toplevel):
              self.PCT_MIN, self.PCT_MAX, "int"),
             ("告警冷却(分钟)", "alert.cooldown_min",
              "同一 provider 两次告警之间的最短间隔",
+             0, 1440, "int"),
+            ("全局告警间隔(分钟)", "alert.max_per_hour",
+             "所有 provider 合并后,两次通知之间的最短间隔;0 表示不弹",
              0, 1440, "int"),
             ("月度预算($)", "aggregate.monthly_budget_usd",
              "底部汇总条参考线;0–100000",
@@ -168,8 +172,8 @@ class SettingsDialog(tk.Toplevel):
             pady=4)
 
         tk.Label(parent, text="API Key", bg=BG, fg=FG,
-                 font=(FONT, 10)).grid(row=start_row + 3, column=0,
-                                       sticky="w", pady=4, padx=(0, 8))
+                  font=(FONT, 10)).grid(row=start_row + 3, column=0,
+                                        sticky="w", pady=4, padx=(0, 8))
         self.add_key_var = tk.StringVar()
         self.add_key_entry = tk.Entry(parent, textvariable=self.add_key_var,
                                       width=44, bg=BG_FIELD, fg=FG,
@@ -185,34 +189,52 @@ class SettingsDialog(tk.Toplevel):
         self.add_key_entry.bind("<KeyRelease>",
                                 lambda e: self._schedule_probe(delay=0.6))
 
+        tk.Label(parent, text="默认模型 (必填)", bg=BG, fg=FG,
+                  font=(FONT, 10)).grid(row=start_row + 4, column=0,
+                                        sticky="w", pady=4, padx=(0, 8))
+        self.add_model_var = tk.StringVar()
+        self.add_model_entry = tk.Entry(parent, textvariable=self.add_model_var,
+                                        width=44, bg=BG_FIELD, fg=FG,
+                                        insertbackground=FG, font=(FONT, 10),
+                                        relief="flat")
+        self.add_model_entry.grid(row=start_row + 4, column=1, columnspan=2,
+                                  sticky="ew", pady=4)
+        self.add_model_entry.insert(0, "e.g. gpt-4o / MiniMax-M3")
+        self.add_model_entry.config(foreground=DIM)
+        self._add_model_placeholder = True
+        self.add_model_entry.bind("<FocusIn>", self._add_model_focus_in)
+        self.add_model_entry.bind("<FocusOut>", self._add_model_focus_out)
+        self.add_model_entry.bind("<KeyRelease>",
+                                  lambda e: self._schedule_model_probe(delay=0.8))
+
         tk.Label(parent, text="显示名称", bg=BG, fg=FG,
-                 font=(FONT, 10)).grid(row=start_row + 4, column=0,
-                                       sticky="w", pady=4, padx=(0, 8))
+                  font=(FONT, 10)).grid(row=start_row + 5, column=0,
+                                        sticky="w", pady=4, padx=(0, 8))
         self.add_name_var = tk.StringVar()
         tk.Entry(parent, textvariable=self.add_name_var, width=44,
                  bg=BG_FIELD, fg=FG, insertbackground=FG,
                  font=(FONT, 10), relief="flat").grid(
-            row=start_row + 4, column=1, columnspan=2, sticky="ew",
+            row=start_row + 5, column=1, columnspan=2, sticky="ew",
             pady=4)
 
         tk.Label(parent, text="预览", bg=BG, fg=DIM,
-                 font=(FONT, 9)).grid(row=start_row + 5, column=0,
-                                       sticky="nw", pady=(6, 4),
-                                       padx=(0, 8))
-        self.add_preview = tk.Text(parent, height=5, width=50,
+                  font=(FONT, 9)).grid(row=start_row + 6, column=0,
+                                        sticky="nw", pady=(6, 4),
+                                        padx=(0, 8))
+        self.add_preview = tk.Text(parent, height=6, width=50,
                                    bg=BG_FIELD, fg=FG, font=FONT_S,
                                    relief="flat", wrap="word",
                                    state="disabled")
-        self.add_preview.grid(row=start_row + 5, column=1, columnspan=2,
+        self.add_preview.grid(row=start_row + 6, column=1, columnspan=2,
                               sticky="ew", pady=(6, 4))
         self._set_add_preview("等待输入 key …")
 
         sep2 = tk.Frame(parent, height=1, bg="#3a3a4a")
-        sep2.grid(row=start_row + 6, column=0, columnspan=3, sticky="ew",
+        sep2.grid(row=start_row + 7, column=0, columnspan=3, sticky="ew",
                   pady=(10, 6))
 
         btn_frame = tk.Frame(parent, bg=BG)
-        btn_frame.grid(row=start_row + 7, column=0, columnspan=3,
+        btn_frame.grid(row=start_row + 8, column=0, columnspan=3,
                        sticky="e", pady=(4, 0))
         tk.Button(btn_frame, text="取消", command=self.destroy,
                   bg=BTN_BG, fg=FG, relief="flat", font=(FONT, 10),
@@ -238,10 +260,39 @@ class SettingsDialog(tk.Toplevel):
             self.add_key_entry.config(foreground=DIM, show="")
             self._add_key_placeholder = True
 
+    def _add_model_focus_in(self, e):
+        if self._add_model_placeholder:
+            self.add_model_entry.delete(0, "end")
+            self.add_model_entry.config(foreground=FG)
+            self._add_model_placeholder = False
+        self._add_model_autofilled = False
+
+    def _add_model_focus_out(self, e):
+        if not self.add_model_var.get().strip():
+            self.add_model_entry.delete(0, "end")
+            self.add_model_entry.insert(0, "e.g. gpt-4o / MiniMax-M3")
+            self.add_model_entry.config(foreground=DIM)
+            self._add_model_placeholder = True
+
     def _apply_add_preset(self, kind, url, label):
         self.add_url_var.set(url)
         if not self.add_name_var.get().strip():
             self.add_name_var.set(label)
+        autofill = {
+            "minimax": "MiniMax-M3",
+            "deepseek": "deepseek-chat",
+            "opencode_go": "opencode-go",
+            "zhipu": "glm-4-flash",
+            "generic_openai": "gpt-4o-mini",
+        }.get(kind, "")
+        if autofill and (self._add_model_placeholder
+                         or getattr(self, "_add_model_autofilled", False)):
+            self.add_model_entry.delete(0, "end")
+            self.add_model_entry.insert(0, autofill)
+            self.add_model_entry.config(foreground=FG)
+            self._add_model_placeholder = False
+            self._add_model_autofilled = True
+            self._model_probe_result = None
         self.add_key_entry.focus_set()
 
     def _set_add_preview(self, text):
@@ -254,6 +305,42 @@ class SettingsDialog(tk.Toplevel):
         if self._probe_thread and self._probe_thread.is_alive():
             return
         self.after(int(delay * 1000), self._probe_now)
+
+    def _schedule_model_probe(self, delay=0.8):
+        if self._add_model_placeholder:
+            self._model_probe_result = None
+            self._refresh_add_btn()
+            return
+        model = self.add_model_var.get().strip()
+        if not model:
+            self._model_probe_result = None
+            self._refresh_add_btn()
+            return
+        if self._model_probe_thread and self._model_probe_thread.is_alive():
+            return
+        self._model_probe_started_at = time.time()
+        self._model_probe_thread = threading.Thread(
+            target=self._model_probe_worker, args=(model,), daemon=True)
+        self._model_probe_thread.start()
+
+    def _model_probe_worker(self, model):
+        key = self.add_key_var.get().strip()
+        url = self.add_url_var.get().strip()
+        try:
+            ok, latency, err = self._probe_model(url, key, model,
+                                                  timeout=10.0)
+        except Exception as e:
+            ok, latency, err = False, 0.0, str(e)
+        elapsed = time.time() - self._model_probe_started_at
+        self.after(0, self._model_probe_done, model, ok, latency, err, elapsed)
+
+    def _model_probe_done(self, model, ok, latency, err, elapsed):
+        if self.add_model_var.get().strip() != model:
+            return
+        self._model_probe_result = {"ok": ok, "error": err, "latency": latency}
+        self._model_probe_elapsed = elapsed
+        self._refresh_preview()
+        self._refresh_add_btn()
 
     def _probe_now(self):
         if self._probe_thread and self._probe_thread.is_alive():
@@ -289,6 +376,22 @@ class SettingsDialog(tk.Toplevel):
         self.after(0, self._probe_done, detected, probe_result, elapsed)
 
     def _probe_done(self, detected, probe_result, elapsed):
+        self._detected = detected
+        self._probe_result = probe_result
+        self._probe_elapsed = elapsed
+        if not self.add_name_var.get().strip() and detected["kind"]:
+            self.add_name_var.set(PRETTY_NAMES.get(detected["kind"], detected["kind"]))
+        self._schedule_model_probe(delay=0.0)
+        self._refresh_preview()
+        self._refresh_add_btn()
+
+    def _refresh_preview(self):
+        detected = getattr(self, "_detected")
+        probe_result = self._probe_result
+        elapsed = self._probe_elapsed
+        if not detected:
+            self._set_add_preview("等待输入 key …")
+            return
         lines = [
             f"类型:     {detected['kind']}",
             f"置信度:   {detected['confidence']}",
@@ -311,20 +414,35 @@ class SettingsDialog(tk.Toplevel):
                     unit = probe_result.get("unit", "")
                     lines.append(f"余额:     {unit}{probe_result['remaining']:.2f}")
         lines.append(f"\n耗时:     {elapsed:.1f}s")
+        model_result = self._model_probe_result
+        if model_result is not None:
+            if model_result.get("ok"):
+                lines.append(
+                    f"默认模型:  ✓ {self.add_model_var.get().strip()}"
+                    f"  ({self._model_probe_elapsed:.1f}s)")
+            else:
+                lines.append(f"默认模型:  ✗ {model_result.get('error')}")
+        elif not self._add_model_placeholder and self.add_model_var.get().strip():
+            lines.append("默认模型:  试调中 …")
         self._set_add_preview("\n".join(lines))
-        if not self.add_name_var.get().strip() and detected["kind"]:
-            pretty = {"minimax": "MiniMax", "deepseek": "DeepSeek",
-                      "zhipu": "智谱 GLM", "opencode_go": "OpenCode Go",
-                      "relay": "中转站"}.get(detected["kind"], detected["kind"])
-            self.add_name_var.set(pretty)
-        ok = detected["kind"] and (detected["base_url"]
-                                    or detected["kind"] != "generic_openai")
-        if ok and probe_result and not probe_result.get("error"):
-            self.add_btn.config(state="normal")
-        elif ok and detected["kind"] != "generic_openai":
-            self.add_btn.config(state="normal")
-        else:
+
+    def _refresh_add_btn(self):
+        if self._add_key_placeholder or not self.add_key_var.get().strip():
             self.add_btn.config(state="disabled")
+            return
+        if self._add_model_placeholder or not self.add_model_var.get().strip():
+            self.add_btn.config(state="disabled")
+            return
+        mr = self._model_probe_result
+        if mr is None or not mr.get("ok"):
+            self.add_btn.config(state="disabled")
+            return
+        detected = getattr(self, "_detected", None)
+        if detected and detected["kind"] == "generic_openai" and \
+                not detected.get("base_url"):
+            self.add_btn.config(state="disabled")
+            return
+        self.add_btn.config(state="normal")
 
     def _add_now(self):
         if self._add_key_placeholder:
@@ -332,9 +450,15 @@ class SettingsDialog(tk.Toplevel):
         key = self.add_key_var.get().strip()
         url = self.add_url_var.get().strip()
         name = self.add_name_var.get().strip() or "未命名"
-        if not key:
+        if self._add_model_placeholder:
             return
-        entry = {"name": name, "key": key, "base_url": url}
+        model = self.add_model_var.get().strip()
+        if not key or not model:
+            return
+        if self._model_probe_result is None or not self._model_probe_result.get("ok"):
+            return
+        entry = {"name": name, "key": key, "base_url": url,
+                 "default_model": model}
         if self._on_add_key:
             try:
                 self._on_add_key(entry)
@@ -344,10 +468,18 @@ class SettingsDialog(tk.Toplevel):
         self.add_key_var.set("")
         self.add_url_var.set("")
         self.add_name_var.set("")
+        self.add_model_var.set("")
         self._add_key_placeholder = True
+        self._add_model_placeholder = True
         self.add_key_entry.delete(0, "end")
         self.add_key_entry.insert(0, "粘贴 API key")
         self.add_key_entry.config(foreground=DIM, show="")
+        self.add_model_entry.delete(0, "end")
+        self.add_model_entry.insert(0, "e.g. gpt-4o / MiniMax-M3")
+        self.add_model_entry.config(foreground=DIM)
+        self._model_probe_result = None
+        self._detected = None
+        self._probe_result = None
         self._set_add_preview(f"已添加 {name}。可继续添加下一个,或点保存设置关闭窗口。")
 
     def _save(self):
@@ -393,7 +525,11 @@ class SettingsDialog(tk.Toplevel):
                     break
             if v is None:
                 if vtype == "int":
-                    v = lo if path.endswith("_min") or path.endswith("cooldown_min") else 30
+                    if path.endswith("_min") or path.endswith("cooldown_min") \
+                            or path.endswith("max_per_hour"):
+                        v = lo
+                    else:
+                        v = 30
                 else:
                     v = 0.0
             var.set(f"{v:g}")

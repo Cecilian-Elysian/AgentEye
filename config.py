@@ -6,6 +6,50 @@ from pathlib import Path
 
 CONFIG_PATH = Path.home() / ".agenteye" / "config.json"
 
+
+def _encrypt_providers(providers):
+    """把 providers 列表里每个 key 升级为 key_enc(若 secure 可用)。"""
+    try:
+        import secure
+    except Exception:
+        return False
+    if not secure.is_available():
+        return False
+    changed = False
+    for p in providers or []:
+        if not isinstance(p, dict):
+            continue
+        if p.get("key_enc"):
+            continue
+        plain = p.get("key")
+        if not plain:
+            continue
+        enc = secure.protect(plain)
+        if not enc:
+            continue
+        p["key_enc"] = enc
+        # 保留明文 key 以兼容不支持 DPAPI 的运行环境;目标环境才删除
+        # 为避免明文落盘,迁移后删除 key 字段
+        p.pop("key", None)
+        changed = True
+    return changed
+
+
+def plain_key(provider):
+    """provider dict → 明文 key;优先用 key_enc,失败回退 key。"""
+    if not isinstance(provider, dict):
+        return ""
+    enc = provider.get("key_enc")
+    if enc:
+        try:
+            import secure
+            decoded = secure.unprotect(enc)
+            if decoded is not None:
+                return decoded
+        except Exception:
+            pass
+    return provider.get("key") or ""
+
 ENV_DEFAULTS = {
     "minimax": "MINIMAX_API_KEY",
     "opencode_go": "OPENCODE_GO_API_KEY",
@@ -22,6 +66,7 @@ TEMPLATE = {
         "warn_amount": 10,
         "critical_amount": 3,
         "cooldown_min": 60,
+        "max_per_hour": 60,
     },
     "ui": {"x": None, "y": None},
     "relay_sites": [
@@ -119,6 +164,7 @@ V2_TEMPLATE = {
         "warn_amount": 10,
         "critical_amount": 3,
         "cooldown_min": 60,
+        "max_per_hour": 60,
     },
     "aggregate": {
         "enabled": True,
@@ -214,6 +260,8 @@ def atomic_save(path, data):
 def save_v2(cfg):
     """保存 v2 schema 配置(原子写)。"""
     try:
+        # 写盘前把明文 key 加密(若可用);失败则原样保存,不阻塞配置
+        _encrypt_providers(cfg.get("providers") or [])
         atomic_save(CONFIG_PATH, cfg)
     except OSError:
         pass
@@ -266,6 +314,13 @@ def load_v2():
     if user_cfg.get("schema_version") == 2:
         merged = merge_v2_defaults(copy.deepcopy(V2_TEMPLATE), user_cfg)
         apply_env_v2(merged)
+        # 加密升级:首次加载时把 plaintext key 转成 key_enc 并落盘
+        providers = merged.get("providers") or []
+        if _encrypt_providers(providers):
+            try:
+                save_v2(merged)
+            except OSError:
+                pass
         return merged
 
     backup = CONFIG_PATH.with_suffix(".v1.bak")
@@ -275,5 +330,12 @@ def load_v2():
     except OSError:
         pass
     migrated = migrate_v1_to_v2(user_cfg)
-    save_v2(migrated)
+    providers = migrated.get("providers") or []
+    if _encrypt_providers(providers):
+        try:
+            save_v2(migrated)
+        except OSError:
+            pass
+    else:
+        save_v2(migrated)
     return migrated
