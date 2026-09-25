@@ -16,7 +16,7 @@
 
 import tkinter as tk
 
-from ui.theme import PALETTE, Layout
+from ui.theme import PALETTE, Layout, TEXT_TK, TEXT_DIM_TK
 from ui.fonts import fonts
 from ui.vibrancy import apply_window_chrome
 
@@ -76,13 +76,14 @@ class TrafficLight(tk.Canvas):
 
 
 class MacHeader(tk.Frame):
-    """macOS 风标题栏:左侧交通灯,中间标题,右侧(预留)控件。"""
+    """macOS 风标题栏:左侧交通灯,中间标题,右侧设置按钮。"""
 
     def __init__(self, parent, title, actions, fonts_dict,
                  on_drag_start, on_drag_motion):
         super().__init__(parent, bg=PALETTE.BG, height=Layout.HEADER_HEIGHT)
         self.pack_propagate(False)
         self._actions = actions or {}
+        self._fonts_dict = fonts_dict
 
         left = tk.Frame(self, bg=PALETTE.BG)
         left.pack(side="left", padx=(Layout.PAD_X, 0),
@@ -100,13 +101,49 @@ class MacHeader(tk.Frame):
 
         self.title_lbl = tk.Label(
             self, text=title, font=fonts_dict["title"],
-            fg=PALETTE.TEXT, bg=PALETTE.BG,
+            fg=TEXT_TK, bg=PALETTE.BG,
         )
         self.title_lbl.place(relx=0.5, rely=0.5, anchor="center")
 
-        for w in (self, self.title_lbl, left):
+        right = tk.Frame(self, bg=PALETTE.BG)
+        right.pack(side="right", padx=(0, Layout.PAD_X),
+                   pady=(Layout.HEADER_HEIGHT - 22) / 2)
+
+        self.settings_btn = self._make_settings_btn(right, actions.get("open_settings"))
+        self.settings_btn.pack(side="right")
+
+        for w in (self, self.title_lbl, left, right):
             w.bind("<Button-1>", on_drag_start, add="+")
             w.bind("<B1-Motion>", on_drag_motion, add="+")
+
+    def _make_settings_btn(self, parent, command):
+        """右侧 ⚙ 按钮:flat + 浅灰底 + hover 加深。"""
+        btn = tk.Label(
+            parent, text="⚙", cursor="hand2",
+            font=(self._fonts_dict["ui"], 13),
+            fg=TEXT_DIM_TK, bg=PALETTE.BG,
+            padx=8, pady=2,
+        )
+        btn._idle_fg = TEXT_DIM_TK
+        btn._idle_bg = PALETTE.BG
+        btn._hover_fg = TEXT_TK
+        btn._hover_bg = PALETTE.CARD_HOVER
+        btn.bind("<Enter>", lambda e: btn.config(fg=btn._hover_fg, bg=btn._hover_bg))
+        btn.bind("<Leave>", lambda e: btn.config(fg=btn._idle_fg, bg=btn._idle_bg))
+        if command:
+            btn.bind("<Button-1>", lambda e: command(), add="+")
+        return btn
+
+    def set_settings_palette(self, fg, bg, hover_fg, hover_bg):
+        """主题切换时刷新 ⚙ 配色。"""
+        self.settings_btn._idle_fg = fg
+        self.settings_btn._idle_bg = bg
+        self.settings_btn._hover_fg = hover_fg
+        self.settings_btn._hover_bg = hover_bg
+        try:
+            self.settings_btn.config(fg=fg, bg=bg)
+        except tk.TclError:
+            pass
 
     def set_expand_color(self, color):
         self.expand_btn.set_color(color)
@@ -322,7 +359,7 @@ class MacWindow:
     def _apply_chrome(self):
         try:
             self.root.update_idletasks()
-            apply_window_chrome(self.root, dark=True)
+            apply_window_chrome(self.root, dark=PALETTE.IS_DARK)
         except Exception:
             pass
 

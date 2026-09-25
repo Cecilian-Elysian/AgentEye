@@ -16,6 +16,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from providers import detect as detect_mod
+from ui.theme import PALETTE, to_tk_color
 
 
 PRESETS = [
@@ -33,7 +34,7 @@ class AddKeyDialog(tk.Toplevel):
     def __init__(self, parent, on_save, generic_probe=None, current_count=0):
         super().__init__(parent)
         self.title(f"添加 Key  ·  当前已配置 {current_count} 个")
-        self.configure(bg="#1d1d2b")
+        self.configure(bg=to_tk_color(PALETTE.CARD))
         self.resizable(False, False)
         self.transient(parent)
 
@@ -52,9 +53,14 @@ class AddKeyDialog(tk.Toplevel):
 
     def _build_ui(self):
         PAD = {"padx": 12, "pady": 6}
-        BG = "#1d1d2b"
-        FG = "#e8e8f0"
-        DIM = "#8b8b9e"
+        BG = to_tk_color(PALETTE.CARD)
+        FG = to_tk_color(PALETTE.TEXT)
+        DIM = to_tk_color(PALETTE.TEXT_DIM)
+        BG_FIELD = to_tk_color(PALETTE.BAR_BG)
+        BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
+        BTN_HOVER = to_tk_color(PALETTE.CARD_PRESSED)
+        OK = to_tk_color(PALETTE.OK)
+        FG_ON_OK = to_tk_color(PALETTE.BG)
         FONT = ("Microsoft YaHei UI", 10)
         FONT_S = ("Microsoft YaHei UI", 9)
 
@@ -67,18 +73,18 @@ class AddKeyDialog(tk.Toplevel):
         preset_frame.grid(row=0, column=1, columnspan=2, sticky="w", pady=(2, 4))
         for i, (label, kind, url) in enumerate(PRESETS):
             b = tk.Label(preset_frame, text=label, font=FONT_S,
-                         bg="#2a2a3a", fg=FG, padx=10, pady=4, cursor="hand2")
+                         bg=BTN_BG, fg=FG, padx=10, pady=4, cursor="hand2")
             b.grid(row=0, column=i, padx=(0, 6))
             b.bind("<Button-1>",
                    lambda e, k=kind, u=url, lbl=label: self._apply_preset(k, u, lbl))
-            b.bind("<Enter>", lambda e, w=b: w.config(bg="#3a3a4a"))
-            b.bind("<Leave>", lambda e, w=b: w.config(bg="#2a2a3a"))
+            b.bind("<Enter>", lambda e, w=b: w.config(bg=BTN_HOVER))
+            b.bind("<Leave>", lambda e, w=b: w.config(bg=BTN_BG))
 
         tk.Label(body, text="Base URL (可选)", bg=BG, fg=DIM, font=FONT).grid(
             row=1, column=0, sticky="w", **PAD)
         self.url_var = tk.StringVar()
         self.url_entry = tk.Entry(body, textvariable=self.url_var, width=44,
-                                  bg="#15151d", fg=FG, insertbackground=FG,
+                                  bg=BG_FIELD, fg=FG, insertbackground=FG,
                                   font=FONT, relief="flat")
         self.url_entry.grid(row=1, column=1, sticky="ew", **PAD)
         self.url_entry.insert(0, "")
@@ -92,7 +98,7 @@ class AddKeyDialog(tk.Toplevel):
             row=2, column=0, sticky="w", **PAD)
         self.key_var = tk.StringVar()
         self.key_entry = tk.Entry(body, textvariable=self.key_var, width=44,
-                                  bg="#15151d", fg=FG,
+                                  bg=BG_FIELD, fg=FG,
                                   insertbackground=FG, font=FONT, relief="flat")
         self.key_entry.grid(row=2, column=1, sticky="ew", **PAD)
         self.key_entry.insert(0, "sk-... 粘贴 key")
@@ -104,16 +110,16 @@ class AddKeyDialog(tk.Toplevel):
         self.key_entry.bind("<KeyRelease>", lambda e: self._schedule_probe(delay=0.6))
 
         self.detect_btn = tk.Button(body, text="探测", command=self._probe_now,
-                                    bg="#2a2a3a", fg=FG, relief="flat",
-                                    activebackground="#3a3a4a", font=FONT)
+                                    bg=BTN_BG, fg=FG, relief="flat",
+                                    activebackground=BTN_HOVER, font=FONT)
         self.detect_btn.grid(row=1, column=2, rowspan=2, sticky="ns", padx=8)
 
-        sep = tk.Frame(body, height=1, bg="#3a3a4a")
+        sep = tk.Frame(body, height=1, bg=BTN_HOVER)
         sep.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 4))
 
         tk.Label(body, text="识别结果", bg=BG, fg=DIM, font=FONT).grid(
             row=4, column=0, sticky="nw", **PAD)
-        self.preview = tk.Text(body, height=8, width=50, bg="#15151d", fg=FG,
+        self.preview = tk.Text(body, height=8, width=50, bg=BG_FIELD, fg=FG,
                                font=FONT_S, relief="flat",
                                wrap="word", state="disabled")
         self.preview.grid(row=4, column=1, columnspan=2, sticky="ew", **PAD)
@@ -122,20 +128,20 @@ class AddKeyDialog(tk.Toplevel):
             row=5, column=0, sticky="w", **PAD)
         self.name_var = tk.StringVar()
         tk.Entry(body, textvariable=self.name_var, width=44,
-                 bg="#15151d", fg=FG, insertbackground=FG,
+                 bg=BG_FIELD, fg=FG, insertbackground=FG,
                  font=FONT, relief="flat").grid(row=5, column=1, columnspan=2,
                                                 sticky="ew", **PAD)
 
-        sep2 = tk.Frame(body, height=1, bg="#3a3a4a")
+        sep2 = tk.Frame(body, height=1, bg=BTN_HOVER)
         sep2.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(8, 4))
 
         btn_frame = tk.Frame(body, bg=BG)
         btn_frame.grid(row=7, column=0, columnspan=3, sticky="e", pady=(4, 0))
         tk.Button(btn_frame, text="取消", command=self.destroy,
-                  bg="#2a2a3a", fg=FG, relief="flat", font=FONT,
+                  bg=BTN_BG, fg=FG, relief="flat", font=FONT,
                   width=10).pack(side="right", padx=(8, 0))
         self.save_btn = tk.Button(btn_frame, text="保存", command=self._save,
-                                  bg="#53d77a", fg="#15151d", relief="flat",
+                                  bg=OK, fg=FG_ON_OK, relief="flat",
                                   font=FONT, width=10, state="disabled")
         self.save_btn.pack(side="right")
 

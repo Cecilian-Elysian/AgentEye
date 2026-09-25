@@ -22,27 +22,31 @@ from ui.theme import PALETTE, Layout
 _STYLE_NAME_V = "AgentEye.Vertical.TScrollbar"
 _STYLE_NAME_H = "Agenteye.Horizontal.TScrollbar"
 
-_SLIDER_IDLE = "#5C5C66"
-_SLIDER_HOVER = "#8E8E99"
-_TROUGH = PALETTE.BG
+
+def _slider_colors():
+    """主题相关的滚动条滑块颜色。light mode 给低对比深灰避免白上加白。"""
+    return PALETTE.THUMB_IDLE, PALETTE.THUMB_HOVER
 
 
 def _configure_style(style):
     """注册 / 覆盖 ttk 风格。重复调用是幂等的。"""
+    idle, hover = _slider_colors()
+    trough = PALETTE.BG
+    arrow = PALETTE.TEXT_DIM
     try:
-        style.element_create("CustomThumb", "image", _thumb_image(),
+        style.element_create("CustomThumb", "image", _thumb_image(active=False),
                              ("active", _thumb_image(active=True)))
     except tk.TclError:
         pass
 
     style.configure(
         _STYLE_NAME_V,
-        troughcolor=_TROUGH,
-        background=_SLIDER_IDLE,
-        darkcolor=_TROUGH,
-        lightcolor=_TROUGH,
-        bordercolor=_TROUGH,
-        arrowcolor=PALETTE.TEXT_DIM,
+        troughcolor=trough,
+        background=idle,
+        darkcolor=trough,
+        lightcolor=trough,
+        bordercolor=trough,
+        arrowcolor=arrow,
         borderwidth=0,
         arrowsize=0,
         gripcount=0,
@@ -51,19 +55,19 @@ def _configure_style(style):
     )
     style.map(
         _STYLE_NAME_V,
-        background=[("active", _SLIDER_HOVER), ("pressed", _SLIDER_HOVER),
-                    ("disabled", _TROUGH)],
-        arrowcolor=[("disabled", _TROUGH)],
+        background=[("active", hover), ("pressed", hover),
+                    ("disabled", trough)],
+        arrowcolor=[("disabled", trough)],
     )
 
     style.configure(
         _STYLE_NAME_H,
-        troughcolor=_TROUGH,
-        background=_SLIDER_IDLE,
-        darkcolor=_TROUGH,
-        lightcolor=_TROUGH,
-        bordercolor=_TROUGH,
-        arrowcolor=PALETTE.TEXT_DIM,
+        troughcolor=trough,
+        background=idle,
+        darkcolor=trough,
+        lightcolor=trough,
+        bordercolor=trough,
+        arrowcolor=arrow,
         borderwidth=0,
         arrowsize=0,
         gripcount=0,
@@ -72,9 +76,9 @@ def _configure_style(style):
     )
     style.map(
         _STYLE_NAME_H,
-        background=[("active", _SLIDER_HOVER), ("pressed", _SLIDER_HOVER),
-                    ("disabled", _TROUGH)],
-        arrowcolor=[("disabled", _TROUGH)],
+        background=[("active", hover), ("pressed", hover),
+                    ("disabled", trough)],
+        arrowcolor=[("disabled", trough)],
     )
 
 
@@ -83,8 +87,6 @@ _STYLE_CONFIGURED = False
 
 def _ensure_style(root):
     global _STYLE_CONFIGURED
-    if _STYLE_CONFIGURED:
-        return
     style = ttk.Style(root)
     try:
         style.theme_use("clam")
@@ -94,13 +96,20 @@ def _ensure_style(root):
     _STYLE_CONFIGURED = True
 
 
+def refresh_style():
+    """主题切换时重新配置 ttk style。仅在已有 ttk 实例时调用。"""
+    global _STYLE_CONFIGURED
+    _STYLE_CONFIGURED = False
+
+
 def _thumb_image(active=False):
     """生成 8x32 圆角胶囊 PNG,用 tk.PhotoImage 拼像素。
 
     仅用来让 element_create 不抛错;真正的视觉由 style.configure 的
     background 色块决定。这个函数若失败,style 仍可用,只是没有自定义 element。
     """
-    color = _SLIDER_HOVER if active else _SLIDER_IDLE
+    idle, hover = _slider_colors()
+    color = hover if active else idle
     w, h = 8, 32
     img = tk.PhotoImage(width=w, height=h)
     img.put(color, to=(2, 8, w - 2, h - 8))
@@ -117,4 +126,4 @@ def make_dark_scrollbar(parent, orient="vertical", command=None):
                          command=command)
 
 
-__all__ = ["make_dark_scrollbar", "_ensure_style"]
+__all__ = ["make_dark_scrollbar", "_ensure_style", "refresh_style"]

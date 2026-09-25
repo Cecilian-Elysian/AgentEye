@@ -26,16 +26,29 @@ from tkinter import messagebox
 
 from providers import detect as detect_mod
 from ui.presets import PRESETS, PRETTY_NAMES
+from ui.theme import PALETTE, set_theme, current_choice, on_theme_change, to_tk_color
 
 
 FONT = "Microsoft YaHei UI"
-BG = "#1d1d2b"
-BG_FIELD = "#15151d"
-FG = "#e8e8f0"
-DIM = "#8b8b9e"
-OK = "#53d77a"
-CRITICAL = "#ff5d5d"
-BTN_BG = "#2a2a3a"
+BG = to_tk_color(PALETTE.BG)
+BG_FIELD = to_tk_color(PALETTE.BAR_BG)
+FG = to_tk_color(PALETTE.TEXT)
+DIM = to_tk_color(PALETTE.TEXT_DIM)
+OK = to_tk_color(PALETTE.OK)
+CRITICAL = to_tk_color(PALETTE.CRITICAL)
+BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
+
+
+def _refresh_settings_palette():
+    """主题切换时同步本模块的颜色常量。"""
+    global BG, BG_FIELD, FG, DIM, OK, CRITICAL, BTN_BG
+    BG = to_tk_color(PALETTE.BG)
+    BG_FIELD = to_tk_color(PALETTE.BAR_BG)
+    FG = to_tk_color(PALETTE.TEXT)
+    DIM = to_tk_color(PALETTE.TEXT_DIM)
+    OK = to_tk_color(PALETTE.OK)
+    CRITICAL = to_tk_color(PALETTE.CRITICAL)
+    BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
 
 
 class SettingsDialog(tk.Toplevel):

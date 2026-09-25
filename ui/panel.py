@@ -4,28 +4,31 @@
 - 底部:状态栏 (下次刷新倒计时)
 - 交互:拖拽带边缘磁吸,光标反馈,快捷键 (F5/Esc/Ctrl+Q)
 - 颜色:基于消耗比的绿→黄→红渐变,主值与 detail 中所有金额/百分比同步上色
+- 主题:读 ui.theme.PALETTE,主题切换时通过 _refresh_palette() 重画所有 row / header / footer / grip
 """
 
 import re
 import time
 import tkinter as tk
 
+from ui.theme import PALETTE, set_theme, on_theme_change, to_tk_color
 from ui.scrollbar_style import make_dark_scrollbar
 
 FONT = "Microsoft YaHei UI"
 
 C = {
-    "bg": "#15151d",
-    "card": "#1d1d2b",
-    "card_hover": "#232335",
-    "bar_bg": "#2a2a3a",
-    "text": "#e8e8f0",
-    "dim": "#8b8b9e",
-    "ok": "#53d77a",
-    "warn": "#f0c24b",
-    "critical": "#ff5d5d",
-    "error": "#ff8f6b",
-    "off": "#5b5b68",
+    "bg": to_tk_color(PALETTE.BG),
+    "card": to_tk_color(PALETTE.CARD),
+    "card_hover": to_tk_color(PALETTE.CARD_HOVER),
+    "bar_bg": to_tk_color(PALETTE.BAR_BG),
+    "text": to_tk_color(PALETTE.TEXT),
+    "dim": to_tk_color(PALETTE.TEXT_DIM),
+    "ok": to_tk_color(PALETTE.OK),
+    "warn": to_tk_color(PALETTE.WARN),
+    "critical": to_tk_color(PALETTE.CRITICAL),
+    "error": to_tk_color(PALETTE.ERROR),
+    "off": to_tk_color(PALETTE.OFF),
+    "card_amount": to_tk_color(PALETTE.CARD_AMOUNT),
 }
 
 LEVEL_COLOR = {k: C[k] for k in ("ok", "warn", "critical", "error")}
@@ -39,6 +42,46 @@ MAX_W, MAX_H = 800, 900
 RESIZE_GRIP = 16
 BTN_BG = "#2a2a3a"
 BTN_HOVER = "#34344a"
+
+
+def _refresh_C():
+    """主题切换时同步刷新本模块的 C / LEVEL_COLOR 字典。"""
+    C["bg"] = to_tk_color(PALETTE.BG)
+    C["card"] = to_tk_color(PALETTE.CARD)
+    C["card_hover"] = to_tk_color(PALETTE.CARD_HOVER)
+    C["bar_bg"] = to_tk_color(PALETTE.BAR_BG)
+    C["text"] = to_tk_color(PALETTE.TEXT)
+    C["dim"] = to_tk_color(PALETTE.TEXT_DIM)
+    C["ok"] = to_tk_color(PALETTE.OK)
+    C["warn"] = to_tk_color(PALETTE.WARN)
+    C["critical"] = to_tk_color(PALETTE.CRITICAL)
+    C["error"] = to_tk_color(PALETTE.ERROR)
+    C["off"] = to_tk_color(PALETTE.OFF)
+    C["card_amount"] = to_tk_color(PALETTE.CARD_AMOUNT)
+    LEVEL_COLOR["ok"] = C["ok"]
+    LEVEL_COLOR["warn"] = C["warn"]
+    LEVEL_COLOR["critical"] = C["critical"]
+    LEVEL_COLOR["error"] = C["error"]
+    LEVEL_COLOR["unconfigured"] = C["off"]
+    LEVEL_COLOR["unknown"] = C["dim"]
+
+
+def _sync_to_tk():
+    """Tk 不接受 8 位 hex。widget 上的 bg/fg 已经在创建时用 to_tk_color,这里只是返回当前版本。"""
+    return {
+        "bg": to_tk_color(PALETTE.BG),
+        "card": to_tk_color(PALETTE.CARD),
+        "card_hover": to_tk_color(PALETTE.CARD_HOVER),
+        "bar_bg": to_tk_color(PALETTE.BAR_BG),
+        "text": to_tk_color(PALETTE.TEXT),
+        "dim": to_tk_color(PALETTE.TEXT_DIM),
+        "ok": to_tk_color(PALETTE.OK),
+        "warn": to_tk_color(PALETTE.WARN),
+        "critical": to_tk_color(PALETTE.CRITICAL),
+        "error": to_tk_color(PALETTE.ERROR),
+        "off": to_tk_color(PALETTE.OFF),
+        "card_amount": to_tk_color(PALETTE.CARD_AMOUNT),
+    }
 
 
 def _fmt_main(result):
@@ -195,7 +238,7 @@ def _is_amount_mode(result):
 
 def _row_bg(result):
     """金额行返回金色微调底色,额度行不变。"""
-    return "#1d1b25" if _is_amount_mode(result) else C["card"]
+    return C["card_amount"] if _is_amount_mode(result) else C["card"]
 
 
 def _compute_target_static(rows, y_root):
@@ -394,6 +437,8 @@ class Panel:
         self._pause_idx = m.index("end")
         m.add_command(label="暂停轮询", command=self.actions["toggle_pause"])
         m.add_command(label="打开配置文件", command=self.actions["open_config"])
+        m.add_command(label="设置…",
+                      command=self.actions.get("open_settings", lambda: None))
         m.add_separator()
         m.add_command(label="退出", command=self.actions["quit"])
         return m

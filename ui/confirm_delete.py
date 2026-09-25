@@ -7,15 +7,17 @@
 import tkinter as tk
 from tkinter import ttk
 
+from ui.theme import PALETTE, to_tk_color
+
 
 FONT = "Microsoft YaHei UI"
-BG = "#1d1d2b"
-BG_FIELD = "#15151d"
-FG = "#e8e8f0"
-DIM = "#8b8b9e"
-OK = "#53d77a"
-CRITICAL = "#ff5d5d"
-BTN_BG = "#2a2a3a"
+BG = to_tk_color(PALETTE.BG)
+BG_FIELD = to_tk_color(PALETTE.BAR_BG)
+FG = to_tk_color(PALETTE.TEXT)
+DIM = to_tk_color(PALETTE.TEXT_DIM)
+OK = to_tk_color(PALETTE.OK)
+CRITICAL = to_tk_color(PALETTE.CRITICAL)
+BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
 
 
 class ConfirmDeleteDialog(tk.Toplevel):
@@ -71,7 +73,7 @@ class ConfirmDeleteDialog(tk.Toplevel):
         ).pack(side="right", padx=(8, 0))
         self.confirm_btn = tk.Button(
             btn_frame, text="确认删除", command=self._do_confirm,
-            bg=CRITICAL, fg="#15151d", relief="flat", font=(FONT, 10),
+            bg=CRITICAL, fg=to_tk_color(PALETTE.BG), relief="flat", font=(FONT, 10),
             width=10, state="disabled",
         )
         self.confirm_btn.pack(side="right")

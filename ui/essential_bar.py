@@ -178,7 +178,7 @@ class EssentialBar:
 
         self.bar_canvas = tk.Canvas(
             bar_holder, height=Layout.BAR_HEIGHT,
-            bg="#3A3A3A", highlightthickness=0, bd=0,
+            bg=PALETTE.BAR_BG, highlightthickness=0, bd=0,
         )
         self.bar_canvas.pack(side="left", fill="x", expand=True)
 

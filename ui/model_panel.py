@@ -5,6 +5,7 @@ import time
 import tkinter as tk
 
 from ui.scrollbar_style import make_dark_scrollbar
+from ui.theme import PALETTE, to_tk_color
 
 
 class ModelPanel(tk.Toplevel):
@@ -25,7 +26,7 @@ class ModelPanel(tk.Toplevel):
                  on_reorder=None, on_after_reorder=None):
         super().__init__(parent)
         self.title(f"{provider_name} · 模型列表")
-        self.configure(bg="#1d1d2b")
+        self.configure(bg=to_tk_color(PALETTE.CARD))
         self.geometry("420x520")
         self.transient(parent)
 
@@ -36,9 +37,12 @@ class ModelPanel(tk.Toplevel):
         self.on_after_reorder = on_after_reorder
         self._drag = None
 
-        BG = "#1d1d2b"
-        FG = "#e8e8f0"
-        DIM = "#8b8b9e"
+        BG = to_tk_color(PALETTE.CARD)
+        FG = to_tk_color(PALETTE.TEXT)
+        DIM = to_tk_color(PALETTE.TEXT_DIM)
+        BG_FIELD = to_tk_color(PALETTE.BAR_BG)
+        BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
+        OK = to_tk_color(PALETTE.OK)
         FONT = ("Microsoft YaHei UI", 10)
 
         top = tk.Frame(self, bg=BG)
@@ -52,7 +56,7 @@ class ModelPanel(tk.Toplevel):
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *a: self._apply_filter())
         tk.Entry(search_frame, textvariable=self.search_var,
-                 bg="#15151d", fg=FG, insertbackground=FG,
+                 bg=BG_FIELD, fg=FG, insertbackground=FG,
                  font=FONT, relief="flat").pack(fill="x")
 
         calc_frame = tk.Frame(self, bg=BG)
@@ -62,13 +66,13 @@ class ModelPanel(tk.Toplevel):
         self.calc_n_var = tk.StringVar(value="100")
         self.calc_n_var.trace_add("write", lambda *a: self._on_calc_change())
         tk.Entry(calc_frame, textvariable=self.calc_n_var, width=6,
-                 bg="#15151d", fg=FG, insertbackground=FG,
+                 bg=BG_FIELD, fg=FG, insertbackground=FG,
                  font=(FONT, 9), relief="flat").pack(side="left", padx=(4, 2))
         tk.Label(calc_frame, text="次 (按选定模型)", bg=BG, fg=DIM,
                  font=(FONT, 9)).pack(side="left")
         self.calc_cost_var = tk.StringVar(value="选择模型后查看")
         tk.Label(calc_frame, textvariable=self.calc_cost_var,
-                 bg=BG, fg="#53d77a", font=(FONT, 9, "bold")).pack(
+                 bg=BG, fg=OK, font=(FONT, 9, "bold")).pack(
             side="right")
 
         list_frame = tk.Frame(self, bg=BG)
@@ -91,7 +95,7 @@ class ModelPanel(tk.Toplevel):
         self.canvas.bind("<Leave>", self._wheel_leave)
 
         tk.Button(self, text="关闭", command=self.destroy,
-                  bg="#2a2a3a", fg=FG, relief="flat", font=FONT,
+                  bg=BTN_BG, fg=FG, relief="flat", font=FONT,
                   width=10).pack(side="right", padx=12, pady=8)
 
         self.bind("<Escape>", lambda e: self.destroy())
@@ -133,8 +137,8 @@ class ModelPanel(tk.Toplevel):
             w.destroy()
 
         if not self.filtered:
-            tk.Label(self.inner, text="(无匹配)", bg="#1d1d2b",
-                     fg="#8b8b9e", font=("Microsoft YaHei UI", 10)).pack(pady=20)
+            tk.Label(self.inner, text="(无匹配)", bg=BG,
+                     fg=DIM, font=("Microsoft YaHei UI", 10)).pack(pady=20)
             try:
                 self.canvas.update_idletasks()
                 self.canvas.yview_moveto(0.0)
@@ -146,9 +150,11 @@ class ModelPanel(tk.Toplevel):
         for m in self.filtered:
             grouped.setdefault(self._group(m), []).append(m)
 
-        BG = "#1d1d2b"
-        DIM = "#8b8b9e"
-        FG = "#e8e8f0"
+        BG = to_tk_color(PALETTE.CARD)
+        DIM = to_tk_color(PALETTE.TEXT_DIM)
+        FG = to_tk_color(PALETTE.TEXT)
+        BG_FIELD = to_tk_color(PALETTE.BAR_BG)
+        BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
         FONT = ("Microsoft YaHei UI", 9)
 
         for group_name in ["Claude", "GPT", "Gemini", "Llama", "Qwen",
@@ -158,23 +164,23 @@ class ModelPanel(tk.Toplevel):
             tk.Label(self.inner, text=group_name, bg=BG, fg=DIM,
                      font=(FONT[0], 9, "bold")).pack(anchor="w", pady=(8, 2))
             for m in grouped[group_name]:
-                row = tk.Frame(self.inner, bg="#15151d", cursor="hand2")
+                row = tk.Frame(self.inner, bg=BG_FIELD, cursor="hand2")
                 row.pack(fill="x", pady=1)
                 row._model_id = m
-                tk.Label(row, text=m, bg="#15151d", fg=FG,
+                tk.Label(row, text=m, bg=BG_FIELD, fg=FG,
                          font=FONT, anchor="w").pack(side="left", padx=8, pady=4)
                 if self.on_probe:
                     self.probe_result_var = tk.StringVar(value="")
                     tk.Label(row, textvariable=self.probe_result_var,
-                             bg="#15151d", fg=DIM, font=(FONT[0], 8),
+                             bg=BG_FIELD, fg=DIM, font=(FONT[0], 8),
                              width=12, anchor="e").pack(
                         side="right", padx=4)
                     tk.Button(row, text="试调", font=(FONT[0], 8),
-                              bg="#2a2a3a", fg=FG, relief="flat",
+                              bg=BTN_BG, fg=FG, relief="flat",
                               command=lambda model=m: self._probe(model)).pack(
                         side="right", padx=4, pady=2)
                 select_btn = tk.Label(row, text="估算", font=(FONT[0], 8),
-                                      bg="#2a2a3a", fg=FG, cursor="hand2")
+                                      bg=BTN_BG, fg=FG, cursor="hand2")
                 select_btn.pack(side="right", padx=(0, 4), pady=2)
                 self._attach_tooltip(select_btn, "用于上方估算调用成本")
                 select_btn.bind("<Button-1>", lambda e, model=m: self._select_model(model))
