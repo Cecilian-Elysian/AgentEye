@@ -1,28 +1,56 @@
-# AgentEye v2
+# AgentEye
 
-常驻桌面的多 Key 额度观察工具。粘贴 key 即用,自动识别 provider 类型,
-自动拉取可用模型列表,实时显示总额度与各 provider 明细。
+> 常驻桌面的多 Key 额度观察工具。粘贴 key 即用,自动识别 provider 类型,
+> 自动拉取可用模型列表,实时显示总额度与各 provider 明细。
 
-## v2 新特性
+## 特性
 
-- **粘贴 key 即用**:Add Key 对话框自动识别 provider(OpenAI 兼容 / 元序等中转 / MiniMax / OpenCode Go / DeepSeek / 智谱)
+### 监控与告警
+
+- **粘贴 key 即用**:Add Key 对话框自动识别 provider(OpenAI 兼容 / 中转站 / MiniMax / OpenCode Go / DeepSeek / 智谱)
 - **5 个一键预设**:Add Key 顶部 5 个按钮(MiniMax / DeepSeek / 智谱 / OpenCode / 中转站),点一下自动填默认 URL 和名称
-- **金额/额度双视图**:金额行($ ¥ 额度)无进度条 + 💰 前缀 + 暖色底;百分比行带渐变进度条
-- **消耗渐变色**:绿→黄→红三色插值,基于 used_today/total 计算消耗比,detail 中所有金额/百分比同步上色
+- **金额/额度双视图**:金额行(`$ ¥ 额度`)无进度条 + 💰 前缀 + 暖色底;百分比行带渐变进度条
+- **今日已用 / 总额**:中转站显示 `今日 $X.XX / $Y.YY`,百分比行继续显示 `5h% · 周% · 倒计时`
+- **消耗渐变色**:绿→黄→红三色插值,基于 `used_today/total` 计算消耗比,主值与 detail 中所有 `$X` / `¥X` / `X%` 同步上色
+- **全局告警节流**:新增 `alert.max_per_hour`(默认 60 min),跨 provider / 跨等级合并,1 小时最多弹一次 toast,杜绝反复弹 / 多 provider 各自弹
+- **告警时间戳持久化**:全局告警时间戳落到 `~/.agenteye/cache/alert_state.json`,重启后 1h 闸门不归零,频繁重启也不会刷屏;`max_per_hour=0` 等同关闭告警
+
+### 窗口与交互
+
 - **窗口可拖拽 resize**:右下角 grip 调整面板大小(280×180 ~ 800×900),实时自适应 wraplength
-- **主面板 + 模型面板 拖拽重排**:长按 >8px 触发,红线指示器,顺序持久化到 cfg 和 cache;模型面板拖完后自动触发一次额度刷新
-- **窗口固定按钮**:Header ⊙/○ 切换 topmost,状态持久化
-- **最小化按钮**:Header – 最小化到任务栏,点击任务栏还原(自动恢复无边框+置顶状态)
-- **Header 按钮风格统一**:≡ ⊙ – × 全部为 flat 深色按钮(#2a2a3a,等宽 width=1),hover 高亮
-- **设置界面**:Header ≡ 打开,改刷新间隔、告警/临界阈值(双币种独立)、月度预算、汇率;**同页含添加 Key 表单**(5 预设 + 自动探测 + 连续添加)
-- **删除确认**:右键删除 provider 需输入名字确认,同时清理 models 缓存并在 probe 日志追加删除标记
-- **模型列表自动拉取**:每个 provider 显示 `/v1/models` 列表,按能力分组(Claude/GPT/Gemini/...),支持搜索(计数实时更新,拖动不跳滚动位)
+- **主面板 + 模型面板 拖拽重排**:长按 > 8 px 触发,红线指示器,顺序持久化;模型面板拖完自动触发一次额度刷新
+- **窗口固定按钮**:Header `⊙` / `○` 切换 topmost,状态持久化
+- **最小化按钮**:Header `–` 最小化到任务栏,点击任务栏还原(自动恢复无边框 + 置顶)
+- **Header 风格统一**:`≡ ⊙ – ×` 全部为 flat 深色按钮,hover 高亮
+- **主面板滚动条**:窗口缩小或 provider 多时,右侧滚动条 + 滚轮滚动查看
+- **边缘磁吸 + 快捷键**:F5 刷新,Ctrl+Q 退出,Esc 关闭弹窗,聚焦时自动刷新
+
+### 模型与试调
+
+- **模型列表自动拉取**:每个 provider 显示 `/v1/models`,按能力分组(Claude / GPT / Gemini / ...),支持搜索(计数实时更新,拖动不跳滚动位)
 - **1-token 试调**:点击"试调"发送 1 token 请求,显示延迟,记录到 `~/.agenteye/cache/probe.jsonl`
-- **金额今日已用/总额**:中转站显示 `今日 $X.XX / $Y.YY`,百分比行继续显示 5h%/周%/倒计时
 - **价格计算器**:模型详情面板估算 N 次调用的花费(常见模型公开价表)
-- **交互优化**:行 hover 高亮、点击数值复制(无移动)、边缘磁吸、F5/Ctrl+Q/Esc 快捷键、首启欢迎 toast
-- **通知合并**:同一 tick 内多条告警合并为一条 toast(避免刷屏)
-- **v1 自动迁移**:旧的 5 分立数组配置自动升级为统一 `providers[]`,备份为 `config.json.v1.bak`
+
+### 配置与管理
+
+- **设置界面**:Header `≡` 打开,改刷新间隔、告警/临界阈值(双币种独立)、**全局告警间隔**、月度预算、汇率;同页含添加 Key 表单(5 预设 + 自动探测 + 连续添加)
+- **删除确认**:右键删除 provider 需输入名字确认,同时清理 models 缓存并追加 probe 日志标记
+- **首启欢迎 toast**:首次启动给出操作提示
+- **v1 自动迁移**:旧的 5 个分立数组配置自动升级为统一 `providers[]`,备份为 `config.json.v1.bak`
+
+## 快速开始
+
+```
+git clone ...
+双击 run.bat
+```
+
+依赖: `requests`、`tkinter`(标准库)。
+
+```
+run.bat          双击(后台 pythonw,无控制台)
+python main.py   前台运行便于看报错
+```
 
 ## 配置 schema (v2)
 
@@ -34,9 +62,12 @@
   "refresh_interval_sec": 30,
   "alert": {
     "enable": true,
-    "warn_pct": 30, "critical_pct": 10,
-    "warn_amount": 10, "critical_amount": 3,
-    "cooldown_min": 60
+    "warn_pct": 30,
+    "critical_pct": 10,
+    "warn_amount": 10,
+    "critical_amount": 3,
+    "cooldown_min": 60,
+    "max_per_hour": 60
   },
   "aggregate": {
     "enabled": true,
@@ -58,61 +89,64 @@
 环境变量覆盖: `MINIMAX_API_KEY` / `OPENCODE_GO_API_KEY` / `DEEPSEEK_API_KEY`,
 或在条目里写 `"api_key_env": "自定义环境变量名"`。
 
+`alert.max_per_hour` 说明:
+
+| 值 | 行为 |
+|---|---|
+| `0` | 等同关闭所有 toast 告警(per-provider `cooldown_min` 也失效) |
+| `> 0` | 任意 provider / 任意等级变化,合并为一条 toast,每 N 分钟最多一次 |
+| 默认 `60` | 1 小时最多一条 |
+
 ## 支持的 provider
 
 | kind | 接口 | 显示 |
 |---|---|---|
-| `relay` | 自动探测 6 种中转站端点 | 余额/已用 |
-| `minimax` | 按 key 前缀选 coding_plan/token_plan | 5h% + 周% + 倒计时 |
-| `opencode_go` | `opencode.ai/zen/go/v1/usage` | 5h/周/月估算金额 |
+| `relay` | 自动探测 6 种中转站端点 | 余额 / 已用 |
+| `minimax` | 按 key 前缀选 `coding_plan` / `token_plan` | 5h% + 周% + 倒计时 |
+| `opencode_go` | `opencode.ai/zen/go/v1/usage` | 5h / 周 / 月估算金额 |
 | `deepseek` | `api.deepseek.com/user/balance` | 总余额 + 赠金/充值拆分 |
-| `zhipu` | `open.bigmodel.cn/api/monitor/usage/quota/limit` | 5h/周% + 倒计时 + 套餐档位 |
+| `zhipu` | `open.bigmodel.cn/api/monitor/usage/quota/limit` | 5h / 周% + 倒计时 + 套餐档位 |
 | `generic_openai` | 探测 `/v1/models` + 4 种 quota endpoint | 模型列表 + 余额 |
-
-## 启动
-
-```
-run.bat          双击(后台 pythonw,无控制台)
-python main.py   前台运行便于看报错
-```
-
-依赖: `requests`、`tkinter`(标准库)。
 
 ## 窗口操作
 
-- **拖动**:按住空白处(标题/底部/行间空隙)拖,自动边缘磁吸(< 20px 贴边);行内按下拖动是重排,不会移动窗口
-- **拖拽重排行**:按住行任何位置超过 8px 进入拖拽模式,出现红色指示线,松开释放
-- **主面板滚动条**:窗口缩小或 provider 多时,右侧滚动条 + 滚轮上下滚动查看
+- **拖动**:按住空白处(标题/底部/行间空隙)拖,自动边缘磁吸(< 20 px 贴边);行内按下拖动是重排,不会移动窗口
+- **拖拽重排行**:按住行任何位置超过 8 px 进入拖拽模式,出现红色指示线,松开释放
 - **调整大小**:右下角 grip(`size_nw_se` 光标)拖动改变面板大小,内部自适应
 - **光标**:拖动时 `fleur`,行 hover `hand2`,× 按钮 hover 变红
 - **点击数值**:无移动 → 复制到剪贴板;有移动 → 拖拽重排
 - **右键行**:刷新此行 / 查看模型 / 试调 / 编辑 / 暂停 / 复制 key / 复制 URL / 删除(删除需输入名字确认)
-- **点击 ≡ 按钮**:打开设置界面(刷新间隔 / 告警阈值 / 月度预算 / 汇率 / 同页添加 Key)
-- **点击 ⊙/○ 按钮**:切换窗口固定(topmost),⊙ = 固定,○ = 不固定
+- **点击 ≡ 按钮**:打开设置界面(刷新间隔 / 告警阈值 / **全局告警间隔** / 月度预算 / 汇率 / 同页添加 Key)
+- **点击 ⊙ / ○ 按钮**:切换窗口固定(topmost)
 - **点击 – 按钮**:最小化到任务栏,点击任务栏图标还原
 - **右键菜单**:立即刷新 / 通知测试 / 添加 Key / 暂停 / 打开配置 / 退出
 - **键盘**: F5 刷新, Ctrl+Q 退出, Esc 关闭弹窗, 窗口聚焦时自动刷新
 
 ## 行颜色
 
-- 绿 = 正常(ok)
-- 黄 = 低于预警(warn)
-- 红 = 低于告急或查询失败(critical / error)
-- 灰 = 未配置(unconfigured)
+- 绿 = 正常(`ok`)
+- 黄 = 低于预警(`warn`)
+- 红 = 低于告急或查询失败(`critical` / `error`)
+- 灰 = 未配置(`unconfigured`)
 
-**渐变插值**:`_usage_ratio` 返回 0..1,绿(#53d77a) → 黄(#f0c24b) → 红(#ff5d5d)
-三段线性插值;金额行主值和 detail 中所有 `$X`/`¥X`/`X%` 段统一上色。
+**渐变插值**:`_usage_ratio` 返回 0..1,绿(`#53d77a`) → 黄(`#f0c24b`) → 红(`#ff5d5d`)
+三段线性插值;金额行主值和 detail 中所有 `$X` / `¥X` / `X%` 段统一上色。
 
 **行类型**:
-- 金额行(unit ∈ {$, ¥, 额度, 元, ￥}): 无底部进度条,💰 前缀,微调暖色底 #1d1b25
-- 百分比行: 保留 5px 渐变 canvas 进度条,normal card 底
+- 金额行(`unit ∈ {$ ¥ ￥ 额度 元}`):无底部进度条,💰 前缀,微调暖色底 `#1d1b25`
+- 百分比行:保留 5 px 渐变 canvas 进度条,normal card 底
+
+> 进度条绘制由 `<Configure>` 事件驱动,首帧布局完成 / 窗口 resize 时 Tk 自动用真实 `event.width` 重画,不存在"刚打开看不见"或"resize 后宽度错位"问题。
 
 ## 缓存与日志
 
-- 模型列表: `~/.agenteye/cache/models.json` (TTL 6h,按 base_url+key hash)
-- 试调日志: `~/.agenteye/cache/probe.jsonl` (append-only)
-- 配置文件: `~/.agenteye/config.json` (原子写,.tmp + os.replace)
-- v1 备份: `~/.agenteye/config.json.v1.bak`(自动迁移时生成)
+| 文件 | 用途 |
+|---|---|
+| `~/.agenteye/config.json` | 主配置(原子写,`.tmp` + `os.replace`) |
+| `~/.agenteye/config.json.v1.bak` | v1 → v2 迁移时自动备份 |
+| `~/.agenteye/cache/models.json` | 模型列表缓存(TTL 6 h,按 base_url + key hash) |
+| `~/.agenteye/cache/probe.jsonl` | 试调日志(append-only) |
+| `~/.agenteye/cache/alert_state.json` | 全局告警时间戳(1h 闸门持久化) |
 
 ## 测试
 
@@ -120,7 +154,12 @@ python main.py   前台运行便于看报错
 python -m unittest discover tests
 ```
 
-当前 142 测试用例覆盖 detect / generic / cache(含 provider 删除清理)/ migration / aggregate / panel 渐变 / 金额行模式 / 拖拽重排 / 设置校验 / AddKey placeholder / 滚动条结构 / 删除确认 / 模型面板分组与重排回调 / 重建后重绘回归。
+当前 **162 个测试用例** 覆盖:
+
+- `detect` / `generic` / `cache`(含 provider 删除清理)/ `migration` / `aggregate` / `panel` 渐变 / 金额行模式 / 拖拽重排
+- 设置校验 / AddKey placeholder / 滚动条结构 / 删除确认 / 模型面板分组与重排回调 / 重建后重绘回归
+- **告警全局节流** (`test_fire_alerts.py`):跨 provider 合并、跨等级升级被拦、窗口期内不弹、过窗口再弹、`max_per_hour=0` 等效关闭、`cooldown_min=0` 不绕过全局闸门
+- **首帧进度条** (`test_panel_bar.py`):不调 `update_idletasks` 时 Tk `<Configure>` 仍正确驱动 rect、resize 后 handler 用 `event.width` 重画
 
 ## 已知边界
 
@@ -135,7 +174,8 @@ python -m unittest discover tests
 main.py             入口,Poller 线程 + tk mainloop
 config.py           v1 + v2 schema,load_v2 自动迁移,原子写
 cache.py            models_cache (TTL, 含 order) + probe_log (JSONL)
-notify.py           PS 路径锁定 + alert_many 合并
+                    + alert_state (全局告警时间戳)
+notify.py           alert_many 合并 + 跨 provider 全局节流
 providers/
   __init__.py       注册表,collect_entries / fetch_all / _level
   aggregate.py      USD 归一化 + 聚合 level
@@ -144,10 +184,27 @@ providers/
   relay.py / minimax.py / opencode_go.py / deepseek.py / zhipu.py   5 内置 provider
 ui/
   panel.py          主面板:provider 行 + 滚动条 + 拖拽/拖动/resize
+                    进度条由 <Configure> 事件驱动
   row_menu.py       行右键菜单(删除走输入名字确认)
   confirm_delete.py 危险操作确认:输入名字才能确认
   model_panel.py    模型列表 + 拖拽重排 + 搜索 + 分组 + 试调 + 价格计算
-  aggregate_detail.py   聚合明细弹窗
   add_key.py        Add Key 对话框:5 预设 + placeholder + 预览
-  settings_dialog.py   设置界面:刷新/告警/预算/汇率
+  settings_dialog.py   设置界面:刷新/告警/全局间隔/预算/汇率
+  presets.py        内置 provider 预设占位(待设置对话框接线)
 ```
+
+## 更新日志
+
+### v2.1 (最近 4 笔 commit)
+
+- `fix(panel)`:进度条 bar 绑 `<Configure>`,Tk 布局驱动,修首帧不可见 + resize 后不跟随
+- `chore(ui)`:引入 `ui/presets.py` 占位模块,为设置对话框重构做准备
+- `fix(alert)`:全局告警时间戳持久化,重启后 1 h 闸门不归零
+- `feat(alert)`:新增 `alert.max_per_hour` 全局告警间隔,跨 provider 一小时最多一次 toast
+
+### v2.0
+
+- 多 provider 统一面板 + 5 个一键预设
+- 金额/额度双视图 + 渐变色
+- 主面板 + 模型面板拖拽重排 + resize
+- v1 → v2 schema 自动迁移
