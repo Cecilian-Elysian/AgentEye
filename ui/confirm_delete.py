@@ -7,7 +7,7 @@
 import tkinter as tk
 from tkinter import ttk
 
-from ui.theme import PALETTE, to_tk_color
+from ui.theme import PALETTE, to_tk_color, to_tk_color_blended
 from ui.mac_toplevel import MacToplevel
 
 
@@ -15,10 +15,22 @@ FONT = "Microsoft YaHei UI"
 BG = to_tk_color(PALETTE.BG)
 BG_FIELD = to_tk_color(PALETTE.BAR_BG)
 FG = to_tk_color(PALETTE.TEXT)
-DIM = to_tk_color(PALETTE.TEXT_DIM)
+DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
 OK = to_tk_color(PALETTE.OK)
 CRITICAL = to_tk_color(PALETTE.CRITICAL)
 BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
+
+
+def _refresh_confirm_palette():
+    """主题切换时同步本模块的颜色常量。"""
+    global BG, BG_FIELD, FG, DIM, OK, CRITICAL, BTN_BG
+    BG = to_tk_color(PALETTE.BG)
+    BG_FIELD = to_tk_color(PALETTE.BAR_BG)
+    FG = to_tk_color(PALETTE.TEXT)
+    DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
+    OK = to_tk_color(PALETTE.OK)
+    CRITICAL = to_tk_color(PALETTE.CRITICAL)
+    BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
 
 
 class ConfirmDeleteDialog(MacToplevel):
@@ -93,6 +105,10 @@ class ConfirmDeleteDialog(MacToplevel):
         entry.focus_set()
 
     def refresh_palette(self):
+        try:
+            _refresh_confirm_palette()
+        except Exception:
+            pass
         try:
             try:
                 self.body.configure(bg=BG)

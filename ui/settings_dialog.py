@@ -26,7 +26,7 @@ from tkinter import messagebox
 
 from providers import detect as detect_mod
 from ui.presets import PRESETS, PRETTY_NAMES
-from ui.theme import PALETTE, set_theme, current_choice, on_theme_change, to_tk_color
+from ui.theme import PALETTE, set_theme, current_choice, on_theme_change, to_tk_color, to_tk_color_blended
 from ui.mac_toplevel import MacToplevel
 
 
@@ -34,7 +34,7 @@ FONT = "Microsoft YaHei UI"
 BG = to_tk_color(PALETTE.BG)
 BG_FIELD = to_tk_color(PALETTE.BAR_BG)
 FG = to_tk_color(PALETTE.TEXT)
-DIM = to_tk_color(PALETTE.TEXT_DIM)
+DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
 OK = to_tk_color(PALETTE.OK)
 CRITICAL = to_tk_color(PALETTE.CRITICAL)
 BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
@@ -46,7 +46,7 @@ def _refresh_settings_palette():
     BG = to_tk_color(PALETTE.BG)
     BG_FIELD = to_tk_color(PALETTE.BAR_BG)
     FG = to_tk_color(PALETTE.TEXT)
-    DIM = to_tk_color(PALETTE.TEXT_DIM)
+    DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
     OK = to_tk_color(PALETTE.OK)
     CRITICAL = to_tk_color(PALETTE.CRITICAL)
     BTN_BG = to_tk_color(PALETTE.CARD_HOVER)

@@ -11,7 +11,7 @@ import re
 import time
 import tkinter as tk
 
-from ui.theme import PALETTE, set_theme, on_theme_change, to_tk_color, TEXT_TK, TEXT_DIM_TK
+from ui.theme import PALETTE, set_theme, on_theme_change, to_tk_color
 from ui.scrollbar_style import make_dark_scrollbar
 
 FONT = "Microsoft YaHei UI"

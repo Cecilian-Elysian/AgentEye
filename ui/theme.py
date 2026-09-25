@@ -186,7 +186,8 @@ def set_theme(name, broadcast=True, persist=True):
 
     返回实际生效的 palette key (dark/light),即使 name 是 auto 也会解析。
     """
-    global _current_choice, _active_palette
+    global _current_choice, _active_palette, TEXT_TK, TEXT_DIM_TK
+    global TEXT_DISABLED_TK, DIVIDER_TK
     if name not in THEME_CHOICES:
         name = "dark"
     resolved = _resolve(name)
@@ -195,6 +196,10 @@ def set_theme(name, broadcast=True, persist=True):
     _current_choice = name
     _active_palette = PALETTES[resolved]
     _refresh_level_color()
+    TEXT_TK = current_text()
+    TEXT_DIM_TK = current_text_dim()
+    TEXT_DISABLED_TK = current_text_disabled()
+    DIVIDER_TK = current_divider()
     if broadcast:
         for cb in list(_listeners):
             try:
@@ -326,10 +331,54 @@ def to_tk_color(hex_color, fallback=None):
     return fallback or "#FFFFFF"
 
 
-TEXT_TK = to_tk_color(PALETTE.TEXT)
-TEXT_DIM_TK = to_tk_color(PALETTE.TEXT_DIM)
-TEXT_DISABLED_TK = to_tk_color(PALETTE.TEXT_DISABLED)
-DIVIDER_TK = to_tk_color(PALETTE.DIVIDER)
+def to_tk_color_blended(hex_with_alpha_or_6, bg_hex=None):
+    """Tk widget 的 8 位 hex 看不到 alpha,得预混合到 bg 上。
+
+    输入 8 位:解析 AA 通道,把前景 alpha 混合到 bg_hex(默认 PALETTE.BG)。
+    输入 6 位:直接返回。
+    返回 6 位 hex,可直接喂给 widget bg/fg。
+    """
+    h = hex_with_alpha_or_6.lstrip("#")
+    if len(h) == 6:
+        return hex_with_alpha_or_6
+    if len(h) != 8:
+        return "#000000"
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    a = int(h[6:8], 16) / 255.0
+    bg = bg_hex or PALETTE.BG
+    bg = bg.lstrip("#")
+    if len(bg) == 8:
+        bg = bg[:6]
+    br, bg_, bb = int(bg[0:2], 16), int(bg[2:4], 16), int(bg[4:6], 16)
+    r = int(r * a + br * (1 - a))
+    g = int(g * a + bg_ * (1 - a))
+    b = int(b * a + bb * (1 - a))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def current_text():
+    """当前主题下的纯文字色(无 alpha)。"""
+    return to_tk_color(PALETTE.TEXT)
+
+
+def current_text_dim():
+    """当前主题下的"次要文字"色:把 TEXT_DIM 的 alpha 预混合到 BG 上。"""
+    return to_tk_color_blended(PALETTE.TEXT_DIM)
+
+
+def current_text_disabled():
+    """当前主题下的"禁用文字"色。"""
+    return to_tk_color_blended(PALETTE.TEXT_DISABLED)
+
+
+def current_divider():
+    return to_tk_color_blended(PALETTE.DIVIDER)
+
+
+TEXT_TK = current_text()
+TEXT_DIM_TK = current_text_dim()
+TEXT_DISABLED_TK = current_text_disabled()
+DIVIDER_TK = current_divider()
 
 
 def blend(top_hex, bottom_hex, t):
@@ -364,7 +413,9 @@ __all__ = [
     "LEVEL_COLOR", "level_color",
     "LEVEL_OK", "LEVEL_WARN", "LEVEL_CRITICAL", "LEVEL_ERROR",
     "LEVEL_UNCONFIGURED", "LEVEL_UNKNOWN",
-    "hex_with_alpha", "to_tk_color", "blend", "usage_color",
+    "hex_with_alpha", "to_tk_color", "to_tk_color_blended",
+    "current_text", "current_text_dim", "current_text_disabled",
+    "current_divider", "blend", "usage_color",
     "set_theme", "current_palette", "current_choice", "is_dark",
     "on_theme_change", "off_theme_change", "detect_system_theme",
     "THEME_CHOICES", "TEXT_TK", "TEXT_DIM_TK", "TEXT_DISABLED_TK", "DIVIDER_TK",

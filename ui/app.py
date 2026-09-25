@@ -16,7 +16,7 @@
 
 import tkinter as tk
 
-from ui.theme import PALETTE, Layout, TEXT_TK, TEXT_DIM_TK, set_theme, current_choice, on_theme_change
+from ui.theme import PALETTE, Layout, set_theme, current_choice, on_theme_change, to_tk_color, to_tk_color_blended
 from ui.fonts import fonts
 from ui.vibrancy import apply_window_chrome
 
@@ -101,7 +101,7 @@ class MacHeader(tk.Frame):
 
         self.title_lbl = tk.Label(
             self, text=title, font=fonts_dict["title"],
-            fg=TEXT_TK, bg=PALETTE.BG,
+            fg=to_tk_color(PALETTE.TEXT), bg=to_tk_color(PALETTE.BG),
         )
         self.title_lbl.place(relx=0.5, rely=0.5, anchor="center")
 
@@ -121,13 +121,14 @@ class MacHeader(tk.Frame):
         btn = tk.Label(
             parent, text="⚙", cursor="hand2",
             font=(self._fonts_dict["ui"], 13),
-            fg=TEXT_DIM_TK, bg=PALETTE.BG,
+            fg=to_tk_color_blended(PALETTE.TEXT_DIM),
+            bg=to_tk_color(PALETTE.BG),
             padx=8, pady=2,
         )
-        btn._idle_fg = TEXT_DIM_TK
-        btn._idle_bg = PALETTE.BG
-        btn._hover_fg = TEXT_TK
-        btn._hover_bg = PALETTE.CARD_HOVER
+        btn._idle_fg = to_tk_color_blended(PALETTE.TEXT_DIM)
+        btn._idle_bg = to_tk_color(PALETTE.BG)
+        btn._hover_fg = to_tk_color(PALETTE.TEXT)
+        btn._hover_bg = to_tk_color(PALETTE.CARD_HOVER)
         btn.bind("<Enter>", lambda e: btn.config(fg=btn._hover_fg, bg=btn._hover_bg))
         btn.bind("<Leave>", lambda e: btn.config(fg=btn._idle_fg, bg=btn._idle_bg))
         if command:
@@ -207,7 +208,7 @@ class MacWindow:
     def _on_theme_change(self, choice, palette, persist):
         """主题切换回调:重画 root/header/body/slots + 调用所有 view.refresh_palette。"""
         try:
-            bg = palette.BG
+            bg = to_tk_color(palette.BG)
             self.root.configure(bg=bg)
             self.outer.configure(bg=bg)
             self.body.configure(bg=bg)
@@ -215,7 +216,7 @@ class MacWindow:
             self.essential_slot.configure(bg=bg)
             self.header.configure(bg=bg)
             try:
-                self.header.title_lbl.configure(bg=bg, fg=TEXT_TK)
+                self.header.title_lbl.configure(bg=bg, fg=to_tk_color(palette.TEXT))
             except tk.TclError:
                 pass
             for f in self.header.winfo_children():
@@ -224,7 +225,8 @@ class MacWindow:
                 except tk.TclError:
                     pass
             self.header.set_settings_palette(
-                TEXT_DIM_TK, bg, TEXT_TK, palette.CARD_HOVER)
+                to_tk_color_blended(palette.TEXT_DIM), bg,
+                to_tk_color(palette.TEXT), to_tk_color(palette.CARD_HOVER))
         except tk.TclError:
             pass
         for view in (self.standard_attached, self.essential_attached):

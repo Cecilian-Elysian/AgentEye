@@ -5,7 +5,7 @@ import time
 import tkinter as tk
 
 from ui.scrollbar_style import make_dark_scrollbar
-from ui.theme import PALETTE, to_tk_color
+from ui.theme import PALETTE, to_tk_color, to_tk_color_blended
 from ui.mac_toplevel import MacToplevel
 
 
@@ -43,7 +43,7 @@ class ModelPanel(MacToplevel):
 
         BG = to_tk_color(PALETTE.CARD)
         FG = to_tk_color(PALETTE.TEXT)
-        DIM = to_tk_color(PALETTE.TEXT_DIM)
+        DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
         BG_FIELD = to_tk_color(PALETTE.BAR_BG)
         BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
         OK = to_tk_color(PALETTE.OK)
@@ -115,7 +115,7 @@ class ModelPanel(MacToplevel):
         try:
             BG = to_tk_color(PALETTE.CARD)
             FG = to_tk_color(PALETTE.TEXT)
-            DIM = to_tk_color(PALETTE.TEXT_DIM)
+            DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
             BG_FIELD = to_tk_color(PALETTE.BAR_BG)
             BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
             OK = to_tk_color(PALETTE.OK)
@@ -201,7 +201,7 @@ class ModelPanel(MacToplevel):
             grouped.setdefault(self._group(m), []).append(m)
 
         BG = to_tk_color(PALETTE.CARD)
-        DIM = to_tk_color(PALETTE.TEXT_DIM)
+        DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
         FG = to_tk_color(PALETTE.TEXT)
         BG_FIELD = to_tk_color(PALETTE.BAR_BG)
         BTN_BG = to_tk_color(PALETTE.CARD_HOVER)

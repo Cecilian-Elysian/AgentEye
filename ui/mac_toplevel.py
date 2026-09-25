@@ -21,7 +21,7 @@
 
 import tkinter as tk
 
-from ui.theme import PALETTE, Layout, TEXT_TK, TEXT_DIM_TK, on_theme_change
+from ui.theme import PALETTE, Layout, on_theme_change, to_tk_color
 from ui.vibrancy import apply_window_chrome
 
 
@@ -110,7 +110,7 @@ class MacToplevel(tk.Toplevel):
         self.title_lbl = tk.Label(
             self.header, text=self.title() or "",
             font=self._fonts_dict.get("title", ("Segoe UI", 11, "bold")),
-            fg=TEXT_TK, bg=PALETTE.CARD,
+            fg=to_tk_color(PALETTE.TEXT), bg=to_tk_color(PALETTE.CARD),
         )
         self.title_lbl.place(relx=0.5, rely=0.5, anchor="center")
 
@@ -197,12 +197,12 @@ class MacToplevel(tk.Toplevel):
     def _on_theme_change(self, _choice, palette, _persist):
         """主题切换时刷新 MacToplevel 自身配色 + 调用子类的 refresh_palette。"""
         try:
-            bg = palette.CARD
+            bg = to_tk_color(palette.CARD)
             self.configure(bg=bg)
             self.outer.configure(bg=bg)
             self.header.configure(bg=bg)
             self.body.configure(bg=bg)
-            self.title_lbl.configure(bg=bg, fg=TEXT_TK)
+            self.title_lbl.configure(bg=bg, fg=to_tk_color(palette.TEXT))
             for w in self._header_widgets:
                 try:
                     w.configure(bg=bg)

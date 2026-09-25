@@ -16,7 +16,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from providers import detect as detect_mod
-from ui.theme import PALETTE, to_tk_color
+from ui.theme import PALETTE, to_tk_color, to_tk_color_blended
 from ui.mac_toplevel import MacToplevel
 
 
@@ -71,7 +71,7 @@ class AddKeyDialog(MacToplevel):
     def _redraw_colors(self):
         BG = to_tk_color(PALETTE.CARD)
         FG = to_tk_color(PALETTE.TEXT)
-        DIM = to_tk_color(PALETTE.TEXT_DIM)
+        DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
         BG_FIELD = to_tk_color(PALETTE.BAR_BG)
         BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
         BTN_HOVER = to_tk_color(PALETTE.CARD_PRESSED)
@@ -117,7 +117,7 @@ class AddKeyDialog(MacToplevel):
         PAD = {"padx": 12, "pady": 6}
         BG = to_tk_color(PALETTE.CARD)
         FG = to_tk_color(PALETTE.TEXT)
-        DIM = to_tk_color(PALETTE.TEXT_DIM)
+        DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
         BG_FIELD = to_tk_color(PALETTE.BAR_BG)
         BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
         BTN_HOVER = to_tk_color(PALETTE.CARD_PRESSED)

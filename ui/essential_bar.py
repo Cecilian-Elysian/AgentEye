@@ -14,7 +14,7 @@
 import time
 import tkinter as tk
 
-from ui.theme import PALETTE, Layout, usage_color, TEXT_TK, TEXT_DIM_TK, on_theme_change
+from ui.theme import PALETTE, Layout, usage_color, on_theme_change, to_tk_color, to_tk_color_blended
 from ui.fonts import fonts
 
 
@@ -157,32 +157,32 @@ class EssentialBar:
         self.value_lbl = tk.Label(
             top, text="—",
             font=(fonts_dict["mono"], 13, "bold"),
-            fg=TEXT_TK, bg=PALETTE.BG, anchor="w",
+            fg=to_tk_color(PALETTE.TEXT), bg=PALETTE.BG, anchor="w",
         )
         self.value_lbl.pack(side="left")
 
         self.sub_lbl = tk.Label(
             top, text="",
             font=(fonts_dict["ui"], 10),
-            fg=TEXT_DIM_TK, bg=PALETTE.BG, anchor="w",
+            fg=to_tk_color_blended(PALETTE.TEXT_DIM), bg=PALETTE.BG, anchor="w",
         )
         self.sub_lbl.pack(side="left", padx=(6, 0))
 
         self._chevron = tk.Label(
             top, text="›",
             font=(fonts_dict["ui"], 14, "bold"),
-            fg=TEXT_DIM_TK, bg=PALETTE.BG, anchor="e", cursor="hand2",
+            fg=to_tk_color_blended(PALETTE.TEXT_DIM), bg=PALETTE.BG, anchor="e", cursor="hand2",
         )
         self._chevron.pack(side="right", padx=(4, 0))
-        self._chevron.bind("<Enter>", lambda e: self._chevron.config(fg=TEXT_TK))
+        self._chevron.bind("<Enter>", lambda e: self._chevron.config(fg=to_tk_color(PALETTE.TEXT)))
         self._chevron.bind("<Leave>",
-                           lambda e: self._chevron.config(fg=TEXT_DIM_TK))
+                           lambda e: self._chevron.config(fg=to_tk_color_blended(PALETTE.TEXT_DIM)))
         self._chevron.bind("<Button-1>", self._on_chevron_click, add="+")
 
         self.pct_lbl = tk.Label(
             top, text="",
             font=(fonts_dict["ui"], 10, "bold"),
-            fg=TEXT_TK, bg=PALETTE.BG, anchor="e",
+            fg=to_tk_color(PALETTE.TEXT), bg=PALETTE.BG, anchor="e",
         )
         self.pct_lbl.pack(side="right")
 
@@ -207,7 +207,7 @@ class EssentialBar:
         self.countdown_lbl = tk.Label(
             bar_holder, text="",
             font=(fonts_dict["ui"], 9),
-            fg=TEXT_DIM_TK, bg=PALETTE.BG, anchor="e",
+            fg=to_tk_color_blended(PALETTE.TEXT_DIM), bg=PALETTE.BG, anchor="e",
         )
         self.countdown_lbl.pack(side="right", padx=(6, 0))
 
@@ -246,13 +246,13 @@ class EssentialBar:
                       self.pct_lbl, self.countdown_lbl):
                 try:
                     if w is self.sub_lbl or w is self.countdown_lbl:
-                        w.configure(fg=TEXT_DIM_TK)
+                        w.configure(fg=to_tk_color_blended(PALETTE.TEXT_DIM))
                     else:
-                        w.configure(fg=TEXT_TK)
+                        w.configure(fg=to_tk_color(PALETTE.TEXT))
                 except tk.TclError:
                     pass
             try:
-                self._chevron.configure(bg=bg, fg=TEXT_DIM_TK)
+                self._chevron.configure(bg=bg, fg=to_tk_color_blended(PALETTE.TEXT_DIM))
             except (tk.TclError, AttributeError):
                 pass
             self.bar_canvas.configure(bg=PALETTE.BAR_BG)
@@ -314,7 +314,7 @@ class EssentialBar:
             if isinstance(pct, (int, float)):
                 pct_text = _fmt_pct(pct)
         self.value_lbl.config(text=main, fg=color)
-        self.sub_lbl.config(text=sub, fg=TEXT_DIM_TK)
+        self.sub_lbl.config(text=sub, fg=to_tk_color_blended(PALETTE.TEXT_DIM))
         self.pct_lbl.config(text=pct_text, fg=color)
 
         self._last_bar_color = color
