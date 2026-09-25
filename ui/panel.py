@@ -334,6 +334,8 @@ class Panel:
         self._build_resize_grip()
         self.root.bind("<Configure>", self._on_root_configure)
 
+        on_theme_change(self.refresh_palette)
+
     def _place_initial(self):
         ui = self.cfg.get("ui") or {}
         x, y = ui.get("x"), ui.get("y")
@@ -536,6 +538,65 @@ class Panel:
         save_size = self.actions.get("save_size")
         if save_size:
             save_size(self.root.winfo_width(), self.root.winfo_height())
+
+    def refresh_palette(self, *_args):
+        """主题切换时:刷新 C / LEVEL_COLOR、重画所有 row 的 bg 与 fg。
+
+        on_theme_change 监听回调签名 cb(choice, palette, persist);忽略参数。
+        """
+        try:
+            _refresh_C()
+        except Exception:
+            pass
+        try:
+            if not self._mac_mode:
+                self.root.configure(bg=C["bg"])
+            self.rows_container.configure(bg=C["bg"])
+            self.rows_canvas.configure(bg=C["bg"])
+            self.rows_frame.configure(bg=C["bg"])
+            self.footer.configure(bg=C["bg"], fg=C["dim"])
+        except tk.TclError:
+            pass
+
+        for name, widgets in list(self._rows.items()):
+            if not isinstance(widgets, dict):
+                continue
+            try:
+                bg = _row_bg({"unit": ("$" if widgets.get("is_amount") else "")})
+                card = widgets.get("frame")
+                if card:
+                    card.configure(bg=bg)
+                    card._bg = bg
+                    for child in card.winfo_children():
+                        try:
+                            child.configure(bg=bg)
+                        except tk.TclError:
+                            pass
+                bar = widgets.get("bar")
+                if bar is not None:
+                    bar.configure(bg=C["bar_bg"])
+                for key in ("name", "value", "detail"):
+                    w = widgets.get(key)
+                    if w is None:
+                        continue
+                    try:
+                        if key == "name":
+                            w.configure(fg=C["text"], bg=bg)
+                        elif key == "value":
+                            w.configure(bg=bg)
+                        elif key == "detail":
+                            w.configure(fg=C["dim"], bg=bg)
+                    except tk.TclError:
+                        pass
+            except Exception:
+                continue
+
+        results = list(getattr(self.state, "results", None) or [])
+        if results:
+            try:
+                self._rebuild(results)
+            except Exception:
+                pass
 
     def _on_root_configure(self, event):
         if event.widget is not self.root:

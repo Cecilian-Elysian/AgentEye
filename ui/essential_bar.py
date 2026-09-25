@@ -14,7 +14,7 @@
 import time
 import tkinter as tk
 
-from ui.theme import PALETTE, Layout, usage_color, TEXT_TK, TEXT_DIM_TK
+from ui.theme import PALETTE, Layout, usage_color, TEXT_TK, TEXT_DIM_TK, on_theme_change
 from ui.fonts import fonts
 
 
@@ -206,7 +206,32 @@ class EssentialBar:
                   bar_holder, self.bar_canvas, self.countdown_lbl):
             w.bind("<Button-1>", self._on_click, add="+")
 
+        on_theme_change(self.refresh_palette)
         self._tick()
+
+    def refresh_palette(self, *_args):
+        """主题切换时刷新所有 widget 的 bg/fg。"""
+        try:
+            bg = PALETTE.BG
+            self.frame.configure(bg=bg)
+            for w in self.frame.winfo_children():
+                try:
+                    w.configure(bg=bg)
+                except tk.TclError:
+                    pass
+            for w in (self.value_lbl, self.sub_lbl,
+                      self.pct_lbl, self.countdown_lbl):
+                try:
+                    if w is self.sub_lbl or w is self.countdown_lbl:
+                        w.configure(fg=TEXT_DIM_TK)
+                    else:
+                        w.configure(fg=TEXT_TK)
+                except tk.TclError:
+                    pass
+            self.bar_canvas.configure(bg=PALETTE.BAR_BG)
+        except tk.TclError:
+            pass
+        self._update()
 
     def _on_click(self, _event=None):
         if self.on_expand:

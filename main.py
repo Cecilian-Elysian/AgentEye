@@ -162,6 +162,12 @@ def build_actions(root, cfg, state, stop, wake):
     def save_ui():
         config_mod.save_v2(cfg)
 
+    def save_theme(theme):
+        ui = cfg.setdefault("ui", {})
+        if theme in ("dark", "light", "auto"):
+            ui["theme"] = theme
+            config_mod.save_v2(cfg)
+
     def get_order():
         return list((cfg.get("ui") or {}).get("order") or [])
 
@@ -269,6 +275,7 @@ def build_actions(root, cfg, state, stop, wake):
         "save_order": save_order,
         "save_pin": save_pin,
         "save_ui": save_ui,
+        "save_theme": save_theme,
         "get_order": get_order,
         "save_model_order": save_model_order,
         "quit": quit_app,
@@ -298,6 +305,9 @@ def main():
     root = tk.Tk()
     actions = build_actions(root, cfg, state, stop, wake)
     mac = MacWindow(root, cfg, actions)
+
+    initial_theme = (cfg.get("ui") or {}).get("theme") or "auto"
+    mac.apply_theme(initial_theme, broadcast=True, persist=False)
 
     panel = Panel(mac.standard_slot, state, cfg, actions, root_window=root)
     essential = EssentialBar(mac.essential_slot, state, cfg, mac.fonts_dict,

@@ -16,7 +16,7 @@
 
 import tkinter as tk
 
-from ui.theme import PALETTE, Layout, TEXT_TK, TEXT_DIM_TK
+from ui.theme import PALETTE, Layout, TEXT_TK, TEXT_DIM_TK, set_theme, current_choice, on_theme_change
 from ui.fonts import fonts
 from ui.vibrancy import apply_window_chrome
 
@@ -49,7 +49,7 @@ class TrafficLight(tk.Canvas):
             size / 2, size / 2,
             text="",
             font=("Segoe UI", size - 5, "bold"),
-            fill="#4d0000" if kind == "close" else "#5a4500",
+            fill=PALETTE.GLYPH_RED if kind == "close" else PALETTE.GLYPH_YELLOW,
         )
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
@@ -202,6 +202,43 @@ class MacWindow:
         self._drag_active = False
         self._bind_global_drag()
 
+        on_theme_change(self._on_theme_change)
+
+    def _on_theme_change(self, choice, palette, persist):
+        """主题切换回调:重画 root/header/body/slots + 调用所有 view.refresh_palette。"""
+        try:
+            bg = palette.BG
+            self.root.configure(bg=bg)
+            self.outer.configure(bg=bg)
+            self.body.configure(bg=bg)
+            self.standard_slot.configure(bg=bg)
+            self.essential_slot.configure(bg=bg)
+            self.header.configure(bg=bg)
+            try:
+                self.header.title_lbl.configure(bg=bg, fg=TEXT_TK)
+            except tk.TclError:
+                pass
+            for f in self.header.winfo_children():
+                try:
+                    f.configure(bg=bg)
+                except tk.TclError:
+                    pass
+            self.header.set_settings_palette(
+                TEXT_DIM_TK, bg, TEXT_TK, palette.CARD_HOVER)
+        except tk.TclError:
+            pass
+        for view in (self.standard_attached, self.essential_attached):
+            if view is None:
+                continue
+            refresh = getattr(view, "refresh_palette", None)
+            if callable(refresh):
+                try:
+                    refresh(choice, palette, persist)
+                except Exception:
+                    pass
+        self._apply_chrome()
+        self._update_expand_button()
+
     def attach_standard(self, view):
         self.standard_attached = view
 
@@ -324,7 +361,15 @@ class MacWindow:
         if self._mode == MODE_STANDARD:
             self.header.set_expand_color(PALETTE.TRAFFIC_GREEN)
         else:
-            self.header.set_expand_color("#5BB85B")
+            self.header.set_expand_color(PALETTE.TRAFFIC_GREEN_HOVER)
+
+    def apply_theme(self, name, broadcast=True, persist=True):
+        """对外接口:切换主题并广播。
+
+        name ∈ {"dark","light","auto"}。返回实际生效的 palette key。
+        """
+        resolved = set_theme(name, broadcast=broadcast, persist=persist)
+        return resolved
 
     def _safe_actions(self):
         a = dict(self.actions or {})

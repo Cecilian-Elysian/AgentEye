@@ -86,6 +86,13 @@ class SettingsDialog(tk.Toplevel):
         self._bind_shortcuts()
         self._load(cfg)
 
+        try:
+            saved_theme = (cfg.get("ui") or {}).get("theme")
+            if saved_theme in ("dark", "light", "auto"):
+                self._theme_var.set(saved_theme)
+        except Exception:
+            pass
+
         self.update_idletasks()
         self.grab_set()
         self.focus_set()
@@ -93,6 +100,26 @@ class SettingsDialog(tk.Toplevel):
     def _build_ui(self):
         body = tk.Frame(self, bg=BG)
         body.pack(fill="both", expand=True, padx=14, pady=12)
+
+        self._theme_var = tk.StringVar(value=current_choice())
+        theme_frame = tk.Frame(body, bg=BG)
+        theme_frame.grid(row=0, column=0, columnspan=3, sticky="we", pady=(0, 8))
+        tk.Label(theme_frame, text="主题", bg=BG, fg=FG,
+                 font=(FONT, 10)).grid(row=0, column=0, sticky="w",
+                                       padx=(0, 8))
+        for i, choice in enumerate(("dark", "light", "auto")):
+            label = {"dark": "深色", "light": "浅色", "auto": "跟随系统"}[choice]
+            rb = tk.Radiobutton(
+                theme_frame, text=label, variable=self._theme_var, value=choice,
+                bg=BG, fg=FG, selectcolor=BG_FIELD, activebackground=BG,
+                activeforeground=FG, font=(FONT, 10), cursor="hand2",
+                command=self._on_theme_radio_click,
+            )
+            rb.grid(row=0, column=i + 1, padx=(0, 12), sticky="w")
+        tk.Label(theme_frame, text="切换立即生效,跟随系统读 OS 偏好",
+                 bg=BG, fg=DIM, font=(FONT, 8)).grid(
+            row=0, column=4, sticky="w", padx=(8, 0))
+        theme_frame.columnconfigure(4, weight=1)
 
         rows = [
             ("刷新间隔(秒)", "refresh_interval_sec",
@@ -132,26 +159,27 @@ class SettingsDialog(tk.Toplevel):
 
         self._vars = {}
         for i, (label, path, hint, lo, hi, vtype) in enumerate(rows):
+            row_idx = i + 2
             tk.Label(body, text=label, bg=BG, fg=FG,
-                     font=(FONT, 10)).grid(row=i, column=0, sticky="w",
+                     font=(FONT, 10)).grid(row=row_idx, column=0, sticky="w",
                                            pady=4, padx=(0, 8))
             v = tk.StringVar()
             e = tk.Entry(body, textvariable=v, width=14,
                          bg=BG_FIELD, fg=FG, insertbackground=FG,
                          font=(FONT, 10), relief="flat", justify="right")
-            e.grid(row=i, column=1, sticky="e", pady=4)
+            e.grid(row=row_idx, column=1, sticky="e", pady=4)
             self._vars[path] = (v, vtype, lo, hi)
             tk.Label(body, text=hint, bg=BG, fg=DIM,
-                     font=(FONT, 8)).grid(row=i, column=2, sticky="w",
+                     font=(FONT, 8)).grid(row=row_idx, column=2, sticky="w",
                                           pady=4, padx=(8, 0))
 
         body.columnconfigure(2, weight=1)
 
         sep = tk.Frame(body, height=1, bg="#3a3a4a")
-        sep.grid(row=len(rows), column=0, columnspan=3, sticky="ew",
+        sep.grid(row=len(rows) + 2, column=0, columnspan=3, sticky="ew",
                  pady=(10, 8))
 
-        self._build_add_key_section(body, start_row=len(rows) + 1)
+        self._build_add_key_section(body, start_row=len(rows) + 3)
 
     def _build_add_key_section(self, parent, start_row):
         tk.Label(parent, text="添加 Key", bg=BG, fg=FG,
@@ -495,6 +523,11 @@ class SettingsDialog(tk.Toplevel):
         self._probe_result = None
         self._set_add_preview(f"已添加 {name}。可继续添加下一个,或点保存设置关闭窗口。")
 
+    def _on_theme_radio_click(self):
+        """Radio 点击立即应用主题。"""
+        choice = self._theme_var.get()
+        set_theme(choice, broadcast=True, persist=False)
+
     def _save(self):
         cfg = self._cfg
         errors = []
@@ -516,6 +549,12 @@ class SettingsDialog(tk.Toplevel):
             for p in parts[:-1]:
                 target = target.setdefault(p, {})
             target[parts[-1]] = val
+
+        ui = cfg.setdefault("ui", {})
+        if hasattr(self, "_theme_var"):
+            ui["theme"] = self._theme_var.get()
+            set_theme(ui["theme"], broadcast=True, persist=False)
+
         if errors:
             messagebox.showerror("设置错误", "\n".join(errors), parent=self)
             return
