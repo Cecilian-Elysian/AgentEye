@@ -10,6 +10,8 @@ import re
 import time
 import tkinter as tk
 
+from ui.scrollbar_style import make_dark_scrollbar
+
 FONT = "Microsoft YaHei UI"
 
 C = {
@@ -211,11 +213,12 @@ def _compute_target_static(rows, y_root):
 
 
 class Panel:
-    def __init__(self, root, state, cfg, actions):
+    def __init__(self, root, state, cfg, actions, root_window=None):
         self.root = root
         self.state = state
         self.cfg = cfg
         self.actions = actions
+        self.root_window = root_window
 
         self._sig = None
         self._rows = {}
@@ -224,11 +227,25 @@ class Panel:
         self._minimized = False
         self._drag_ok = False
 
-        root.title("AgentEye")
-        root.overrideredirect(True)
-        root.attributes("-topmost", True)
-        root.configure(bg=C["bg"])
-        self._place_initial()
+        is_frame = isinstance(root, tk.Frame) and not isinstance(root, tk.Toplevel)
+        if is_frame and root_window is None:
+            raise ValueError(
+                "Panel 收到 Frame 作为 parent 时,必须显式传入 root_window=Tk 根窗口 "
+                "(用于 title/overrideredirect/attributes/minsize/maxsize/geometry 等窗口级操作)"
+            )
+        if not is_frame:
+            root.title("AgentEye")
+            root.overrideredirect(True)
+            root.attributes("-topmost", True)
+            root.configure(bg=C["bg"])
+            self._place_initial()
+
+        if is_frame:
+            self._mac_mode = True
+            self._build_header = self._skip_build_header
+            self._build_resize_grip = self._skip_build_resize_grip
+        else:
+            self._mac_mode = False
 
         self._build_header()
         self.rows_container = tk.Frame(root, bg=C["bg"])
@@ -236,8 +253,8 @@ class Panel:
                                   pady=(0, 0))
         self.rows_canvas = tk.Canvas(self.rows_container, bg=C["bg"],
                                      highlightthickness=0, bd=0)
-        self.rows_scroll = tk.Scrollbar(self.rows_container, orient="vertical",
-                                        command=self.rows_canvas.yview)
+        self.rows_scroll = make_dark_scrollbar(self.rows_container, orient="vertical",
+                                               command=self.rows_canvas.yview)
         self.rows_frame = tk.Frame(self.rows_canvas, bg=C["bg"])
         self.rows_frame.bind(
             "<Configure>",
@@ -300,6 +317,12 @@ class Panel:
         btn.bind("<Enter>", lambda e: btn.config(bg=BTN_HOVER, fg=btn._hover_fg))
         btn.bind("<Leave>", lambda e: btn.config(bg=BTN_BG, fg=btn._fg))
         return btn
+
+    def _skip_build_header(self):
+        return None
+
+    def _skip_build_resize_grip(self):
+        return None
 
     def _build_header(self):
         header = tk.Frame(self.root, bg=C["bg"])
@@ -649,26 +672,30 @@ class Panel:
                 self._paint_row(widgets, r)
 
         levels = [r.get("level") for r in results]
-        if self.state.paused:
-            self.dot.config(fg=C["off"])
-        elif "critical" in levels:
-            self.dot.config(fg=C["critical"])
-        elif "error" in levels:
-            self.dot.config(fg=C["error"])
-        elif "warn" in levels:
-            self.dot.config(fg=C["warn"])
-        else:
-            self.dot.config(fg=C["ok"])
+        dot = getattr(self, "dot", None)
+        if dot is not None:
+            if self.state.paused:
+                dot.config(fg=C["off"])
+            elif "critical" in levels:
+                dot.config(fg=C["critical"])
+            elif "error" in levels:
+                dot.config(fg=C["error"])
+            elif "warn" in levels:
+                dot.config(fg=C["warn"])
+            else:
+                dot.config(fg=C["ok"])
 
-        if self.state.paused:
-            text = "已暂停轮询"
-        elif self.state.fetching:
-            text = "刷新中…"
-        elif self.state.next_fetch:
-            text = f"下次刷新 {_fmt_countdown(self.state.next_fetch - time.time())}"
-        else:
-            text = "等待首次刷新…"
-        self.footer.config(text=text)
+        footer = getattr(self, "footer", None)
+        if footer is not None:
+            if self.state.paused:
+                text = "已暂停轮询"
+            elif self.state.fetching:
+                text = "刷新中…"
+            elif self.state.next_fetch:
+                text = f"下次刷新 {_fmt_countdown(self.state.next_fetch - time.time())}"
+            else:
+                text = "等待首次刷新…"
+            footer.config(text=text)
 
     def _rebuild(self, results):
         for child in self.rows_frame.winfo_children():

@@ -4,6 +4,8 @@ import threading
 import time
 import tkinter as tk
 
+from ui.scrollbar_style import make_dark_scrollbar
+
 
 class ModelPanel(tk.Toplevel):
     GROUP_RULES = [
@@ -73,8 +75,8 @@ class ModelPanel(tk.Toplevel):
         list_frame.pack(fill="both", expand=True, padx=12, pady=8)
 
         self.canvas = tk.Canvas(list_frame, bg=BG, highlightthickness=0)
-        self.scroll = tk.Scrollbar(list_frame, orient="vertical",
-                                   command=self.canvas.yview)
+        self.scroll = make_dark_scrollbar(list_frame, orient="vertical",
+                                          command=self.canvas.yview)
         self.inner = tk.Frame(self.canvas, bg=BG)
         self.inner.bind("<Configure>",
                         lambda e: self.canvas.configure(

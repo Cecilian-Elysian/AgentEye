@@ -10,6 +10,8 @@ import cache as cache_mod
 from providers import fetch_all
 from ui import Panel
 from ui.add_key import AddKeyDialog
+from ui.app import MacWindow
+from ui.essential_bar import EssentialBar
 
 
 class State:
@@ -157,6 +159,9 @@ def build_actions(root, cfg, state, stop, wake):
         ui["pinned"] = bool(pinned)
         config_mod.save_v2(cfg)
 
+    def save_ui():
+        config_mod.save_v2(cfg)
+
     def get_order():
         return list((cfg.get("ui") or {}).get("order") or [])
 
@@ -263,6 +268,7 @@ def build_actions(root, cfg, state, stop, wake):
         "save_size": save_size,
         "save_order": save_order,
         "save_pin": save_pin,
+        "save_ui": save_ui,
         "get_order": get_order,
         "save_model_order": save_model_order,
         "quit": quit_app,
@@ -291,7 +297,15 @@ def main():
 
     root = tk.Tk()
     actions = build_actions(root, cfg, state, stop, wake)
-    Panel(root, state, cfg, actions)
+    mac = MacWindow(root, cfg, actions)
+
+    panel = Panel(mac.standard_slot, state, cfg, actions, root_window=root)
+    essential = EssentialBar(mac.essential_slot, state, cfg, mac.fonts_dict,
+                             on_expand=mac.toggle_mode)
+
+    mac.attach_standard(panel)
+    mac.attach_essential(essential)
+    mac.show_initial_mode()
     root.mainloop()
 
     stop.set()
