@@ -153,6 +153,34 @@ def _set_detail_with_tags(text_widget, text, fg):
     text_widget.config(state="disabled")
 
 
+def _on_bar_configure(event, bar, rect, widgets):
+    """Tk 布局驱动:bar 实际 width 就绪 / 尺寸变化时重画 rect。
+
+    替代原 ``bar.winfo_width() or 300`` 兜底:
+    - 首帧布局完成 → ``<Configure>`` 触发,``event.width`` 正确 → 修"刚打开进度条看不见"
+    - 窗口 resize → bar 跟随 pack(fill="x") 重排 → ``<Configure>`` 触发 → 修"resize 后 bar 不跟随"
+
+    颜色/比例由 ``_paint_row`` 写入 ``widgets["_bar_color"]`` / ``widgets["_bar_frac"]``。
+    两个键均未初始化时(placeholder 行)直接跳过,保持空 rect。
+    """
+    color = widgets.get("_bar_color")
+    frac = widgets.get("_bar_frac")
+    if color is None and frac is None:
+        return
+    width = getattr(event, "width", 0) or 0
+    if width < 2:
+        return
+    if color is None:
+        color = C["dim"]
+    if frac is None:
+        frac = 1.0
+    try:
+        bar.coords(rect, 0, 0, int(width * frac), 5)
+        bar.itemconfig(rect, fill=color)
+    except tk.TclError:
+        pass
+
+
 def _is_amount_mode(result):
     """判断一行是否"金额行"(显示 $¥ 而非 %)。
 
@@ -699,6 +727,13 @@ class Panel:
                    "detail": det_lbl, "bar": bar, "rect": rect,
                    "provider_name": name, "is_amount": is_amount}
 
+        if bar is not None:
+            bar.bind(
+                "<Configure>",
+                lambda e, b=bar, r=rect, w=widgets: _on_bar_configure(e, b, r, w),
+                add="+",
+            )
+
         for w in (card, top, name_lbl):
             w.bind("<Enter>", lambda e, ww=card: ww.config(bg=C["card_hover"]))
             w.bind("<Leave>", lambda e, ww=card: ww.config(bg=ww._bg))
@@ -845,6 +880,12 @@ class Panel:
         rect = widgets["rect"]
         if bar is None or rect is None:
             return
-        width = bar.winfo_width() or 300
-        bar.coords(rect, 0, 0, width * (frac if frac is not None else 1.0), 5)
-        bar.itemconfig(rect, fill=color)
+        widgets["_bar_frac"] = frac if frac is not None else 1.0
+        widgets["_bar_color"] = color
+        try:
+            width = bar.winfo_width()
+        except tk.TclError:
+            width = 0
+        if width >= 2:
+            bar.coords(rect, 0, 0, int(width * widgets["_bar_frac"]), 5)
+            bar.itemconfig(rect, fill=widgets["_bar_color"])
