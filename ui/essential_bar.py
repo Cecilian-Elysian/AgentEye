@@ -124,7 +124,8 @@ class EssentialBar:
 
     用法:
         bar = EssentialBar(parent, state, cfg, fonts_dict,
-                           on_expand=lambda: mac.toggle_mode())
+                           on_expand=lambda: mac.toggle_mode(),
+                           on_open_models=lambda name: open_model_panel(name))
         bar.pack(...)
     """
 
@@ -132,13 +133,15 @@ class EssentialBar:
     H = 56
 
     def __init__(self, parent, state, cfg, fonts_dict, on_expand=None,
-                 on_pin_toggle=None):
+                 on_pin_toggle=None, on_open_models=None):
         self.parent = parent
         self.state = state
         self.cfg = cfg or {}
         self.fonts_dict = fonts_dict
         self.on_expand = on_expand
         self.on_pin_toggle = on_pin_toggle
+        self.on_open_models = on_open_models
+        self._current_worst_name = None
 
         self._sig = None
         self._last_paint = None
@@ -164,6 +167,17 @@ class EssentialBar:
             fg=TEXT_DIM_TK, bg=PALETTE.BG, anchor="w",
         )
         self.sub_lbl.pack(side="left", padx=(6, 0))
+
+        self._chevron = tk.Label(
+            top, text="›",
+            font=(fonts_dict["ui"], 14, "bold"),
+            fg=TEXT_DIM_TK, bg=PALETTE.BG, anchor="e", cursor="hand2",
+        )
+        self._chevron.pack(side="right", padx=(4, 0))
+        self._chevron.bind("<Enter>", lambda e: self._chevron.config(fg=TEXT_TK))
+        self._chevron.bind("<Leave>",
+                           lambda e: self._chevron.config(fg=TEXT_DIM_TK))
+        self._chevron.bind("<Button-1>", self._on_chevron_click, add="+")
 
         self.pct_lbl = tk.Label(
             top, text="",
@@ -209,6 +223,15 @@ class EssentialBar:
         on_theme_change(self.refresh_palette)
         self._tick()
 
+    def _on_chevron_click(self, _event=None):
+        """点击 › 触发 on_open_models(current_worst_name)。"""
+        if not self.on_open_models or not self._current_worst_name:
+            return
+        try:
+            self.on_open_models(self._current_worst_name)
+        except Exception:
+            pass
+
     def refresh_palette(self, *_args):
         """主题切换时刷新所有 widget 的 bg/fg。"""
         try:
@@ -228,6 +251,10 @@ class EssentialBar:
                         w.configure(fg=TEXT_TK)
                 except tk.TclError:
                     pass
+            try:
+                self._chevron.configure(bg=bg, fg=TEXT_DIM_TK)
+            except (tk.TclError, AttributeError):
+                pass
             self.bar_canvas.configure(bg=PALETTE.BAR_BG)
         except tk.TclError:
             pass
@@ -277,6 +304,7 @@ class EssentialBar:
         self._sig = sig
 
         worst, ratio = _worst(results)
+        self._current_worst_name = worst.get("name") if worst else None
         color = usage_color(ratio) if ratio is not None else PALETTE.GREY
 
         main, sub = _main_value(worst)

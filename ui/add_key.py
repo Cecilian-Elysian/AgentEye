@@ -17,6 +17,7 @@ from tkinter import ttk
 
 from providers import detect as detect_mod
 from ui.theme import PALETTE, to_tk_color
+from ui.mac_toplevel import MacToplevel
 
 
 PRESETS = [
@@ -28,14 +29,17 @@ PRESETS = [
 ]
 
 
-class AddKeyDialog(tk.Toplevel):
+class AddKeyDialog(MacToplevel):
     PROBE_TIMEOUT = 8.0
 
     def __init__(self, parent, on_save, generic_probe=None, current_count=0):
-        super().__init__(parent)
-        self.title(f"添加 Key  ·  当前已配置 {current_count} 个")
-        self.configure(bg=to_tk_color(PALETTE.CARD))
-        self.resizable(False, False)
+        super().__init__(
+            parent, title=f"添加 Key  ·  当前已配置 {current_count} 个",
+            on_close=self._on_close_request,
+            show_minimize=False,
+            width=540, height=560,
+            resizable=False,
+        )
         self.transient(parent)
 
         self.on_save = on_save
@@ -51,6 +55,57 @@ class AddKeyDialog(tk.Toplevel):
         self.grab_set()
         self.focus_set()
 
+    def _on_close_request(self):
+        try:
+            self.destroy()
+        except tk.TclError:
+            pass
+
+    def refresh_palette(self):
+        """主题切换时同步本地常量 + 重画 body。"""
+        try:
+            self._redraw_colors()
+        except tk.TclError:
+            pass
+
+    def _redraw_colors(self):
+        BG = to_tk_color(PALETTE.CARD)
+        FG = to_tk_color(PALETTE.TEXT)
+        DIM = to_tk_color(PALETTE.TEXT_DIM)
+        BG_FIELD = to_tk_color(PALETTE.BAR_BG)
+        BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
+        BTN_HOVER = to_tk_color(PALETTE.CARD_PRESSED)
+        OK = to_tk_color(PALETTE.OK)
+        FG_ON_OK = to_tk_color(PALETTE.BG)
+
+        def walk(w):
+            try:
+                cls = w.winfo_class()
+                if cls == "Frame":
+                    if w.cget("bg") not in ("",):
+                        w.configure(bg=BG)
+                elif cls == "Label":
+                    fg = str(w.cget("fg") or "").upper()
+                    if fg in (DIM.upper(), "#8B8B9E"):
+                        w.configure(bg=BG, fg=DIM)
+                    elif fg == OK.upper():
+                        w.configure(bg=BTN_BG, fg=OK)
+                    else:
+                        w.configure(bg=BG, fg=FG)
+                elif cls == "Entry":
+                    w.configure(bg=BG_FIELD, fg=FG, insertbackground=FG)
+                elif cls == "Button":
+                    fg = str(w.cget("fg") or "").upper()
+                    if fg == FG_ON_OK.upper():
+                        w.configure(bg=OK, fg=FG_ON_OK)
+                    else:
+                        w.configure(bg=BTN_BG, fg=FG)
+            except tk.TclError:
+                pass
+            for c in w.winfo_children():
+                walk(c)
+        walk(self.body)
+
     def _build_ui(self):
         PAD = {"padx": 12, "pady": 6}
         BG = to_tk_color(PALETTE.CARD)
@@ -64,7 +119,7 @@ class AddKeyDialog(tk.Toplevel):
         FONT = ("Microsoft YaHei UI", 10)
         FONT_S = ("Microsoft YaHei UI", 9)
 
-        body = tk.Frame(self, bg=BG)
+        body = tk.Frame(self.body, bg=BG)
         body.pack(fill="both", expand=True, padx=14, pady=12)
 
         tk.Label(body, text="快速选择", bg=BG, fg=DIM, font=FONT).grid(

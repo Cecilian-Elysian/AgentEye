@@ -60,6 +60,7 @@ class DarkPalette:
 
     GLYPH_RED = "#4d0000"
     GLYPH_YELLOW = "#5a4500"
+    GLYPH_GREEN = "#0d3d18"
 
     OK = GREEN
     WARN = YELLOW
@@ -110,6 +111,7 @@ class LightPalette:
 
     GLYPH_RED = "#4d0000"
     GLYPH_YELLOW = "#5a4500"
+    GLYPH_GREEN = "#0d3d18"
 
     OK = GREEN
     WARN = YELLOW

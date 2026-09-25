@@ -8,6 +8,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from ui.theme import PALETTE, to_tk_color
+from ui.mac_toplevel import MacToplevel
 
 
 FONT = "Microsoft YaHei UI"
@@ -20,7 +21,7 @@ CRITICAL = to_tk_color(PALETTE.CRITICAL)
 BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
 
 
-class ConfirmDeleteDialog(tk.Toplevel):
+class ConfirmDeleteDialog(MacToplevel):
     """弹模态框,要求输入 expected_name 才能按"确认"。
 
     用法:
@@ -35,15 +36,18 @@ class ConfirmDeleteDialog(tk.Toplevel):
 
     def __init__(self, parent, name, message="", on_confirm=None,
                  title="删除确认"):
-        super().__init__(parent)
+        super().__init__(
+            parent, title=title,
+            on_close=self._cancel,
+            show_minimize=False,
+            width=420, height=240,
+            resizable=False,
+        )
+        self.transient(parent)
         self._expected = str(name)
         self._on_confirm = on_confirm
-        self.title(title)
-        self.configure(bg=BG)
-        self.resizable(False, False)
-        self.transient(parent)
 
-        body = tk.Frame(self, bg=BG)
+        body = tk.Frame(self.body, bg=BG)
         body.pack(fill="both", expand=True, padx=18, pady=14)
 
         tk.Label(
@@ -84,17 +88,40 @@ class ConfirmDeleteDialog(tk.Toplevel):
         self.bind("<Return>", lambda e: self._do_confirm()
                   if str(self.confirm_btn["state"]) == "normal" else None)
 
-        self.update_idletasks()
-        try:
-            x = parent.winfo_x() + (parent.winfo_width() - self.winfo_width()) // 2
-            y = parent.winfo_y() + (parent.winfo_height() - self.winfo_height()) // 2
-            self.geometry(f"+{max(0, x)}+{max(0, y)}")
-        except tk.TclError:
-            pass
-
         self.grab_set()
         self.focus_set()
         entry.focus_set()
+
+    def refresh_palette(self):
+        try:
+            for w in self.body.winfo_children():
+                self._walk_recolor(w)
+        except tk.TclError:
+            pass
+
+    def _walk_recolor(self, w):
+        try:
+            cls = w.winfo_class()
+            if cls == "Frame":
+                w.configure(bg=BG)
+            elif cls == "Label":
+                fg = str(w.cget("fg") or "").upper()
+                if fg in (DIM.upper(), "#8B8B9E"):
+                    w.configure(bg=BG, fg=DIM)
+                else:
+                    w.configure(bg=BG, fg=FG)
+            elif cls == "Entry":
+                w.configure(bg=BG_FIELD, fg=FG, insertbackground=FG)
+            elif cls == "Button":
+                bg_now = str(w.cget("bg") or "").upper()
+                if bg_now in (CRITICAL.upper(), "#FF5D5D"):
+                    w.configure(bg=CRITICAL, fg=to_tk_color(PALETTE.BG))
+                else:
+                    w.configure(bg=BTN_BG, fg=FG)
+        except tk.TclError:
+            pass
+        for c in w.winfo_children():
+            self._walk_recolor(c)
 
     def _refresh_state(self):
         if self._var.get() == self._expected:

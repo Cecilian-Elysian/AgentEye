@@ -310,8 +310,16 @@ def main():
     mac.apply_theme(initial_theme, broadcast=True, persist=False)
 
     panel = Panel(mac.standard_slot, state, cfg, actions, root_window=root)
+
+    def open_model_panel(provider_name):
+        try:
+            panel._show_models(provider_name)
+        except Exception:
+            pass
+
     essential = EssentialBar(mac.essential_slot, state, cfg, mac.fonts_dict,
-                             on_expand=mac.toggle_mode)
+                             on_expand=mac.toggle_mode,
+                             on_open_models=open_model_panel)
 
     mac.attach_standard(panel)
     mac.attach_essential(essential)

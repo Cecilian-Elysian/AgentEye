@@ -27,6 +27,7 @@ from tkinter import messagebox
 from providers import detect as detect_mod
 from ui.presets import PRESETS, PRETTY_NAMES
 from ui.theme import PALETTE, set_theme, current_choice, on_theme_change, to_tk_color
+from ui.mac_toplevel import MacToplevel
 
 
 FONT = "Microsoft YaHei UI"
@@ -51,7 +52,7 @@ def _refresh_settings_palette():
     BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
 
 
-class SettingsDialog(tk.Toplevel):
+class SettingsDialog(MacToplevel):
     INTERVAL_MIN, INTERVAL_MAX = 15, 3600
     PCT_MIN, PCT_MAX = 1, 99
     AMOUNT_MIN, AMOUNT_MAX = 0.0, 100000.0
@@ -61,11 +62,14 @@ class SettingsDialog(tk.Toplevel):
 
     def __init__(self, parent, cfg, on_save=None, on_add_key=None,
                  generic_probe=None, probe_model=None, current_count=0):
-        super().__init__(parent)
-        self.title("设置")
-        self.configure(bg=BG)
+        super().__init__(
+            parent, title="设置",
+            on_close=self._on_close_request,
+            show_minimize=False,
+            width=560, height=620,
+            resizable=True,
+        )
         self.transient(parent)
-        self.resizable(True, True)
 
         self._cfg = cfg
         self._on_save = on_save
@@ -97,9 +101,61 @@ class SettingsDialog(tk.Toplevel):
         self.grab_set()
         self.focus_set()
 
+    def _on_close_request(self):
+        try:
+            self.destroy()
+        except tk.TclError:
+            pass
+
+    def refresh_palette(self):
+        """主题切换时同步本地常量 + 重画 SettingsDialog 自己的 widget 配色。"""
+        _refresh_settings_palette()
+        try:
+            self._apply_colors_to_tree()
+        except tk.TclError:
+            pass
+
+    def _apply_colors_to_tree(self, root=None):
+        """遍历 self.body 子树,按 widget class 套用 PALETTE 配色。"""
+        if root is None:
+            root = getattr(self, "_body_inner", None) or getattr(self, "body", None)
+            if root is None:
+                return
+        for w in root.winfo_children():
+            cls = w.winfo_class()
+            try:
+                if cls in ("Frame", "Toplevel"):
+                    if w.cget("bg") not in ("", "#000000"):
+                        w.configure(bg=BG)
+                elif cls == "Label":
+                    fg = w.cget("fg")
+                    if fg and isinstance(fg, str):
+                        u = fg.upper()
+                        if u in (DIM.upper(), "#8B8B9E", "#8b8b9e"):
+                            w.configure(bg=BG, fg=DIM)
+                        elif u in (OK.upper(), "#53D77A", "#53d77a"):
+                            w.configure(bg=BG, fg=OK)
+                        else:
+                            w.configure(bg=BG, fg=FG)
+                    else:
+                        w.configure(bg=BG, fg=FG)
+                elif cls == "Entry":
+                    w.configure(bg=BG_FIELD, fg=FG, insertbackground=FG)
+                elif cls == "Button":
+                    w.configure(bg=BTN_BG, fg=FG)
+                elif cls == "Text":
+                    w.configure(bg=BG_FIELD, fg=FG)
+                elif cls == "Radiobutton":
+                    w.configure(bg=BG, fg=FG, selectcolor=BG_FIELD,
+                                activebackground=BG, activeforeground=FG)
+            except tk.TclError:
+                pass
+            self._apply_colors_to_tree(w)
+
     def _build_ui(self):
-        body = tk.Frame(self, bg=BG)
+        body = tk.Frame(self.body, bg=BG)
         body.pack(fill="both", expand=True, padx=14, pady=12)
+        self._body_inner = body
 
         self._theme_var = tk.StringVar(value=current_choice())
         theme_frame = tk.Frame(body, bg=BG)

@@ -6,9 +6,10 @@ import tkinter as tk
 
 from ui.scrollbar_style import make_dark_scrollbar
 from ui.theme import PALETTE, to_tk_color
+from ui.mac_toplevel import MacToplevel
 
 
-class ModelPanel(tk.Toplevel):
+class ModelPanel(MacToplevel):
     GROUP_RULES = [
         ("Claude", ("claude",)),
         ("GPT", ("gpt-", "o1", "o3", "o4")),
@@ -24,10 +25,13 @@ class ModelPanel(tk.Toplevel):
 
     def __init__(self, parent, provider_name, models, on_probe=None,
                  on_reorder=None, on_after_reorder=None):
-        super().__init__(parent)
-        self.title(f"{provider_name} · 模型列表")
-        self.configure(bg=to_tk_color(PALETTE.CARD))
-        self.geometry("420x520")
+        super().__init__(
+            parent, title=f"{provider_name} · 模型列表",
+            on_close=self._on_close,
+            show_minimize=True,
+            width=440, height=540,
+            resizable=True,
+        )
         self.transient(parent)
 
         self.models = list(models or [])
@@ -45,13 +49,13 @@ class ModelPanel(tk.Toplevel):
         OK = to_tk_color(PALETTE.OK)
         FONT = ("Microsoft YaHei UI", 10)
 
-        top = tk.Frame(self, bg=BG)
+        top = tk.Frame(self.body, bg=BG)
         top.pack(fill="x", padx=12, pady=(12, 6))
         self.count_var = tk.StringVar(value=f"{len(self.models)} 个模型")
         tk.Label(top, textvariable=self.count_var,
                  bg=BG, fg=DIM, font=FONT).pack(side="left")
 
-        search_frame = tk.Frame(self, bg=BG)
+        search_frame = tk.Frame(self.body, bg=BG)
         search_frame.pack(fill="x", padx=12)
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *a: self._apply_filter())
@@ -59,7 +63,7 @@ class ModelPanel(tk.Toplevel):
                  bg=BG_FIELD, fg=FG, insertbackground=FG,
                  font=FONT, relief="flat").pack(fill="x")
 
-        calc_frame = tk.Frame(self, bg=BG)
+        calc_frame = tk.Frame(self.body, bg=BG)
         calc_frame.pack(fill="x", padx=12, pady=(4, 0))
         tk.Label(calc_frame, text="估算调用", bg=BG, fg=DIM,
                  font=(FONT, 9)).pack(side="left")
@@ -75,7 +79,7 @@ class ModelPanel(tk.Toplevel):
                  bg=BG, fg=OK, font=(FONT, 9, "bold")).pack(
             side="right")
 
-        list_frame = tk.Frame(self, bg=BG)
+        list_frame = tk.Frame(self.body, bg=BG)
         list_frame.pack(fill="both", expand=True, padx=12, pady=8)
 
         self.canvas = tk.Canvas(list_frame, bg=BG, highlightthickness=0)
@@ -94,20 +98,62 @@ class ModelPanel(tk.Toplevel):
         self.canvas.bind("<Enter>", self._wheel_enter)
         self.canvas.bind("<Leave>", self._wheel_leave)
 
-        tk.Button(self, text="关闭", command=self.destroy,
+        btn_frame = tk.Frame(self.body, bg=BG)
+        btn_frame.pack(side="bottom", fill="x", padx=12, pady=8)
+        tk.Button(btn_frame, text="关闭", command=self._on_close,
                   bg=BTN_BG, fg=FG, relief="flat", font=FONT,
-                  width=10).pack(side="right", padx=12, pady=8)
+                  width=10).pack(side="right")
 
-        self.bind("<Escape>", lambda e: self.destroy())
-        self.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() - self.winfo_width()) // 2
-        y = parent.winfo_y() + 40
-        self.geometry(f"+{max(0, x)}+{max(0, y)}")
+        self.bind("<Escape>", lambda e: self._on_close())
         self.grab_set()
         self.focus_set()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._render()
+
+    def refresh_palette(self):
+        try:
+            BG = to_tk_color(PALETTE.CARD)
+            FG = to_tk_color(PALETTE.TEXT)
+            DIM = to_tk_color(PALETTE.TEXT_DIM)
+            BG_FIELD = to_tk_color(PALETTE.BAR_BG)
+            BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
+            OK = to_tk_color(PALETTE.OK)
+            for w in self.body.winfo_children():
+                self._walk_recolor(w, BG, FG, DIM, BG_FIELD, BTN_BG, OK)
+            try:
+                self.canvas.configure(bg=BG)
+                self.inner.configure(bg=BG)
+            except tk.TclError:
+                pass
+        except tk.TclError:
+            pass
+
+    def _walk_recolor(self, w, BG, FG, DIM, BG_FIELD, BTN_BG, OK):
+        try:
+            cls = w.winfo_class()
+            if cls == "Frame":
+                cur_bg = str(w.cget("bg") or "")
+                if cur_bg.upper() == BG_FIELD.upper() or cur_bg.upper() == "#15151D":
+                    w.configure(bg=BG_FIELD)
+                else:
+                    w.configure(bg=BG)
+            elif cls == "Label":
+                fg_now = str(w.cget("fg") or "").upper()
+                if fg_now == OK.upper():
+                    w.configure(fg=OK)
+                elif fg_now == DIM.upper():
+                    w.configure(fg=DIM)
+                else:
+                    w.configure(fg=FG)
+            elif cls == "Entry":
+                w.configure(bg=BG_FIELD, fg=FG, insertbackground=FG)
+            elif cls == "Button":
+                w.configure(bg=BTN_BG, fg=FG)
+        except tk.TclError:
+            pass
+        for c in w.winfo_children():
+            self._walk_recolor(c, BG, FG, DIM, BG_FIELD, BTN_BG, OK)
 
     def _apply_filter(self):
         q = self.search_var.get().lower().strip()

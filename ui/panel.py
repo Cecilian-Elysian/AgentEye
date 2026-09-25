@@ -11,7 +11,7 @@ import re
 import time
 import tkinter as tk
 
-from ui.theme import PALETTE, set_theme, on_theme_change, to_tk_color
+from ui.theme import PALETTE, set_theme, on_theme_change, to_tk_color, TEXT_TK, TEXT_DIM_TK
 from ui.scrollbar_style import make_dark_scrollbar
 
 FONT = "Microsoft YaHei UI"
@@ -708,13 +708,27 @@ class Panel:
             return
         cards = [w for w in self.rows_frame.pack_slaves()
                  if w is not d.get("widget")]
-        indicator = tk.Frame(self.rows_frame, height=3, bg=C["critical"])
+        indicator = tk.Frame(self.rows_frame, height=3,
+                             bg=PALETTE.BLUE)
         d["indicator"] = indicator
         idx = d["target"]
         if idx < len(cards):
             indicator.pack(fill="x", pady=0, before=cards[idx])
         else:
             indicator.pack(fill="x", pady=0)
+
+        dragged = d.get("widget")
+        if dragged is not None:
+            try:
+                dragged._drag_active = True
+                dragged.configure(bg=C["card_pressed"])
+                for child in dragged.winfo_children():
+                    try:
+                        child.configure(bg=C["card_pressed"])
+                    except tk.TclError:
+                        pass
+            except tk.TclError:
+                pass
 
     def _clear_drag_indicator(self):
         d = getattr(self, "_drag", None)
@@ -724,6 +738,19 @@ class Panel:
             except tk.TclError:
                 pass
             d["indicator"] = None
+        if d and d.get("widget"):
+            w = d["widget"]
+            try:
+                original_bg = getattr(w, "_bg", C["card"])
+                w.configure(bg=original_bg)
+                for child in w.winfo_children():
+                    try:
+                        child.configure(bg=original_bg)
+                    except tk.TclError:
+                        pass
+                w._drag_active = False
+            except tk.TclError:
+                pass
 
     def _commit_drag(self, name, new_index):
         widgets = self._rows.get(name)

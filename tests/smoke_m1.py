@@ -33,7 +33,9 @@ def smoke():
     mac = MacWindow(root, cfg, actions)
 
     assert mac.header is not None
-    assert mac.content is not None
+    assert mac.body is not None
+    assert mac.standard_slot is not None
+    assert mac.essential_slot is not None
     print("[ok] MacWindow created")
     print(f"[ok] header bg = {mac.header.cget('bg')}")
     print(f"[ok] pin color = {PALETTE.TRAFFIC_GREEN}")
