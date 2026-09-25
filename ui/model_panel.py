@@ -119,6 +119,10 @@ class ModelPanel(MacToplevel):
             BG_FIELD = to_tk_color(PALETTE.BAR_BG)
             BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
             OK = to_tk_color(PALETTE.OK)
+            try:
+                self.body.configure(bg=BG)
+            except tk.TclError:
+                pass
             for w in self.body.winfo_children():
                 self._walk_recolor(w, BG, FG, DIM, BG_FIELD, BTN_BG, OK)
             try:

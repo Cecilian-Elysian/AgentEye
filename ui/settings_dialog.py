@@ -121,6 +121,14 @@ class SettingsDialog(MacToplevel):
             root = getattr(self, "_body_inner", None) or getattr(self, "body", None)
             if root is None:
                 return
+        try:
+            cls = root.winfo_class()
+            if cls in ("Frame", "Toplevel"):
+                cur = str(root.cget("bg") or "")
+                if cur not in ("", "#000000"):
+                    root.configure(bg=BG)
+        except tk.TclError:
+            pass
         for w in root.winfo_children():
             cls = w.winfo_class()
             try:

@@ -94,6 +94,10 @@ class ConfirmDeleteDialog(MacToplevel):
 
     def refresh_palette(self):
         try:
+            try:
+                self.body.configure(bg=BG)
+            except tk.TclError:
+                pass
             for w in self.body.winfo_children():
                 self._walk_recolor(w)
         except tk.TclError:

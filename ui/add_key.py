@@ -104,6 +104,13 @@ class AddKeyDialog(MacToplevel):
                 pass
             for c in w.winfo_children():
                 walk(c)
+
+        try:
+            cls = self.body.winfo_class()
+            if cls == "Frame":
+                self.body.configure(bg=BG)
+        except tk.TclError:
+            pass
         walk(self.body)
 
     def _build_ui(self):

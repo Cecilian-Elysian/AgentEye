@@ -44,6 +44,13 @@ BTN_BG = "#2a2a3a"
 BTN_HOVER = "#34344a"
 
 
+def _refresh_BTN():
+    """主题切换时同步本模块的按钮颜色常量。"""
+    global BTN_BG, BTN_HOVER
+    BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
+    BTN_HOVER = to_tk_color(PALETTE.CARD_PRESSED)
+
+
 def _refresh_C():
     """主题切换时同步刷新本模块的 C / LEVEL_COLOR 字典。"""
     C["bg"] = to_tk_color(PALETTE.BG)
@@ -546,6 +553,7 @@ class Panel:
         """
         try:
             _refresh_C()
+            _refresh_BTN()
         except Exception:
             pass
         try:
