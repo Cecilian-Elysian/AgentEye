@@ -212,14 +212,8 @@ class MacToplevel(tk.Toplevel):
                 if dot is None:
                     continue
                 try:
-                    dot.configure(bg=bg)
-                    if dot._kind == "close":
-                        dot.itemconfig(dot._glyph, fill=palette.GLYPH_RED)
-                    elif dot._kind == "minimize":
-                        dot.itemconfig(dot._glyph, fill=palette.GLYPH_YELLOW)
-                    else:
-                        dot.itemconfig(dot._glyph, fill=palette.GLYPH_GREEN)
-                except tk.TclError:
+                    dot.refresh_palette(palette)
+                except Exception:
                     pass
         except tk.TclError:
             pass

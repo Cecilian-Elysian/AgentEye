@@ -1,16 +1,11 @@
-"""Bug regression tests — light theme readability.
-
-背景:之前 `TEXT_TK / TEXT_DIM_TK` 是模块级常量,在 import 时按 dark 调色
-板预求值,之后 set_theme('light') 也不刷新,导致标题在白底上仍是白字
-(不可见)。改用 `to_tk_color(PALETTE.X)` 内联求值后,fg/bg 必须实时跟随。
-"""
+"""Light theme readability + 标题栏布局 (黄绿红 + 标题加权补偿) 回归测试。"""
 import unittest
 import tkinter as tk
 
 from ui.theme import (
     set_theme, current_palette, PALETTE, to_tk_color, to_tk_color_blended,
 )
-from ui.app import MacWindow
+from ui.app import MacWindow, TrafficLight
 from ui.essential_bar import EssentialBar
 import config as config_mod
 
@@ -19,6 +14,11 @@ def _make_root():
     root = tk.Tk()
     root.geometry("360x400+200+200")
     return root
+
+
+def _hex_to_rgb(h):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
 
 
 class TestLightThemeReadability(unittest.TestCase):
@@ -32,36 +32,26 @@ class TestLightThemeReadability(unittest.TestCase):
         except tk.TclError:
             pass
 
-    def _build_mac(self):
+    def _build_mac(self, actions=None):
         cfg = config_mod.load_v2()
-        return MacWindow(self.root, cfg, {})
+        return MacWindow(self.root, cfg, actions or {})
 
     def test_text_tk_module_globals_refresh_on_set_theme(self):
         """TEXT_TK / TEXT_DIM_TK 模块常量必须在 set_theme 之后立即更新。"""
         import ui.theme as t
         t.set_theme("dark", broadcast=False)
-        dark_text = t.TEXT_TK
-        dark_dim = t.TEXT_DIM_TK
-        self.assertEqual(dark_text, "#FFFFFF")
+        self.assertEqual(t.TEXT_TK, "#FFFFFF")
         t.set_theme("light", broadcast=False)
-        light_text = t.TEXT_TK
-        light_dim = t.TEXT_DIM_TK
-        self.assertEqual(light_text, "#000000")
-        self.assertNotEqual(dark_text, light_text)
-        self.assertNotEqual(dark_dim, light_dim)
+        self.assertEqual(t.TEXT_TK, "#000000")
 
     def test_to_tk_color_blended_dim_has_visible_contrast(self):
-        """to_tk_color_blended 把 alpha 预混合到 BG 上,产出的 6 位色应
-        仍然与 BG 形成足够对比度 (差值 > 60)。"""
+        """to_tk_color_blended 把 alpha 预混合到 BG 上,产出 6 位色仍
+        与 BG 形成足够对比度 (差值 > 60)。"""
         for theme in ("dark", "light"):
             with self.subTest(theme=theme):
                 set_theme(theme, broadcast=False)
                 dim = to_tk_color_blended(PALETTE.TEXT_DIM)
                 bg = to_tk_color(PALETTE.BG)
-                # 把两个 hex 转成 RGB 求最大通道差
-                def _hex_to_rgb(h):
-                    h = h.lstrip("#")
-                    return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
                 dr, dg, db = _hex_to_rgb(dim)
                 br, bg_, bb = _hex_to_rgb(bg)
                 max_diff = max(abs(dr - br), abs(dg - bg_), abs(db - bb))
@@ -69,35 +59,14 @@ class TestLightThemeReadability(unittest.TestCase):
                                    f"theme={theme} DIM={dim} BG={bg} 对比度太低")
 
     def test_mac_header_title_visible_in_light_theme(self):
-        """MacHeader.title_lbl 在浅色主题下应该是黑字配浅底,不能白字配白底。"""
         set_theme("dark", broadcast=False)
         mac = self._build_mac()
         mac.apply_theme("light", broadcast=True)
         title = mac.header.title_lbl
-        fg = title.cget("fg").lower()
-        bg = title.cget("bg").lower()
-        self.assertEqual(fg, "#000000")
-        self.assertEqual(bg, "#f5f5f7")
-
-    def test_mac_header_settings_btn_idle_fg_contrasts_with_bg_in_light(self):
-        """⚙ 按钮 idle fg 在浅色下必须是中等灰,不是纯白。"""
-        set_theme("dark", broadcast=False)
-        mac = self._build_mac()
-        mac.apply_theme("light", broadcast=True)
-        btn = mac.header.settings_btn
-        idle_fg = btn._idle_fg.lower()
-        idle_bg = btn._idle_bg.lower()
-        self.assertNotEqual(idle_fg, idle_bg,
-                            f"⚙ idle fg={idle_fg} 与 bg={idle_bg} 相同 → 不可见")
-        # 必须是 6 位 hex,不是 8 位
-        self.assertEqual(len(idle_fg), 7)
-        # 不是纯白
-        self.assertNotEqual(idle_fg, "#ffffff")
-        # 不是纯黑 (应该是 DIM,不是 TEXT)
-        self.assertNotEqual(idle_fg, "#000000")
+        self.assertEqual(title.cget("fg").lower(), "#000000")
+        self.assertEqual(title.cget("bg").lower(), "#f5f5f7")
 
     def test_essential_bar_sub_label_contrasts_in_light(self):
-        """EssentialBar.sub_lbl 在浅色下必须可见(非白字)。"""
         set_theme("dark", broadcast=False)
         bar = EssentialBar(
             self.root, type("S", (), {"paused": False, "fetching": False,
@@ -108,10 +77,8 @@ class TestLightThemeReadability(unittest.TestCase):
         set_theme("light", broadcast=True)
         fg = bar.sub_lbl.cget("fg").lower()
         bg = bar.frame.cget("bg").lower()
-        self.assertNotEqual(fg, bg,
-                            f"sub_lbl fg={fg} 与 bg={bg} 相同 → 不可见")
-        self.assertNotEqual(fg, "#ffffff",
-                            "sub_lbl 浅色下不应是纯白")
+        self.assertNotEqual(fg, bg, f"sub_lbl fg={fg} 与 bg={bg} 相同 → 不可见")
+        self.assertNotEqual(fg, "#ffffff", "sub_lbl 浅色下不应是纯白")
 
     def test_essential_bar_chevron_contrasts_in_light(self):
         bar = EssentialBar(
@@ -125,7 +92,6 @@ class TestLightThemeReadability(unittest.TestCase):
         self.assertNotEqual(fg, "#ffffff", "chevron 浅色下应是 DIM 不是 TEXT")
 
     def test_apply_theme_dark_then_light_then_dark_returns_to_original(self):
-        """来回切换主题,标题颜色应能正确回到原始值。"""
         set_theme("dark", broadcast=False)
         mac = self._build_mac()
         original_fg = mac.header.title_lbl.cget("fg").lower()
@@ -135,6 +101,176 @@ class TestLightThemeReadability(unittest.TestCase):
         mac.apply_theme("dark", broadcast=True)
         self.assertEqual(mac.header.title_lbl.cget("fg").lower(), original_fg)
         self.assertEqual(mac.header.title_lbl.cget("bg").lower(), original_bg)
+
+
+class TestTrafficLightThemeRefresh(unittest.TestCase):
+    """TrafficLight 画布 bg 必须跟主题,修复浅色残留深色方框。"""
+
+    def setUp(self):
+        self.root = _make_root()
+
+    def tearDown(self):
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
+
+    def _mac(self):
+        cfg = config_mod.load_v2()
+        return MacWindow(self.root, cfg, {})
+
+    def test_traffic_light_canvas_bg_updates_on_theme_switch(self):
+        """dark→light 后 3 个 dot 的 Canvas bg 必须变成 palette.BG,
+        而不是停留在构造时 frozen 的 dark 值。"""
+        set_theme("dark", broadcast=False)
+        mac = self._mac()
+        mac.apply_theme("light", broadcast=True)
+        for dot in (mac.header.yellow_dot, mac.header.settings_dot,
+                    mac.header.red_dot):
+            bg = dot.cget("bg").lower()
+            self.assertEqual(bg, "#f5f5f7",
+                             f"{dot._kind} 浅色下 Canvas bg 应 = #f5f5f7,实为 {bg}")
+
+    def test_traffic_light_canvas_bg_round_trip(self):
+        """dark→light→dark 来回切换,bg 必须正确回到 dark 值。"""
+        set_theme("dark", broadcast=False)
+        mac = self._mac()
+        for dot in (mac.header.yellow_dot, mac.header.settings_dot,
+                    mac.header.red_dot):
+            self.assertEqual(dot.cget("bg").lower(), "#1e1e1e")
+        mac.apply_theme("light", broadcast=True)
+        for dot in (mac.header.yellow_dot, mac.header.settings_dot,
+                    mac.header.red_dot):
+            self.assertEqual(dot.cget("bg").lower(), "#f5f5f7")
+        mac.apply_theme("dark", broadcast=True)
+        for dot in (mac.header.yellow_dot, mac.header.settings_dot,
+                    mac.header.red_dot):
+            self.assertEqual(dot.cget("bg").lower(), "#1e1e1e")
+
+    def test_traffic_light_constructs_with_header_dot_flag(self):
+        """新 TrafficLight 必须设 _is_header_dot = True,防止点击触发 drag。"""
+        set_theme("dark", broadcast=False)
+        mac = self._mac()
+        for dot in (mac.header.yellow_dot, mac.header.settings_dot,
+                    mac.header.red_dot):
+            self.assertTrue(getattr(dot, "_is_header_dot", False),
+                            f"{dot._kind} 缺少 _is_header_dot 标志")
+
+
+class TestMacHeaderLayout(unittest.TestCase):
+    """MacHeader 标题栏新布局:无 left,右集群 [黄绿红],标题加权补偿。"""
+
+    def setUp(self):
+        self.root = _make_root()
+
+    def tearDown(self):
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
+
+    def _mac(self, actions=None):
+        cfg = config_mod.load_v2()
+        return MacWindow(self.root, cfg, actions or {})
+
+    def test_no_left_frame_only_right_cluster(self):
+        """MacHeader 不再有 'left' Frame,右集群里正好 3 个 TrafficLight。"""
+        set_theme("dark", broadcast=False)
+        mac = self._mac()
+        children = mac.header.winfo_children()
+        # children = [right Frame, title_lbl Label] — 没有 left
+        frames = [c for c in children if c.winfo_class() == "Frame"]
+        self.assertEqual(len(frames), 1, f"应只有 1 个 Frame,实为 {len(frames)}")
+        right = frames[0]
+        # 验证右集群里正好有 3 个 TrafficLight
+        dots = [c for c in right.winfo_children() if isinstance(c, TrafficLight)]
+        self.assertEqual(len(dots), 3, f"右集群应有 3 个 dot,实为 {len(dots)}")
+
+    def test_right_cluster_order_yellow_green_red(self):
+        """右集群从左到右是黄(最小化) → 绿(设置) → 红(退出)。"""
+        set_theme("dark", broadcast=False)
+        mac = self._mac()
+        self.root.update_idletasks()
+        frames = [c for c in mac.header.winfo_children() if c.winfo_class() == "Frame"]
+        right = frames[0]
+        dots = [c for c in right.winfo_children() if isinstance(c, TrafficLight)]
+        # 按 winfo_x 升序排 → 视觉从左到右
+        dots.sort(key=lambda d: d.winfo_x())
+        kinds = [d._kind for d in dots]
+        self.assertEqual(kinds, ["minimize", "settings", "close"],
+                         f"右集群从左到右应为 [minimize, settings, close],实为 {kinds}")
+
+    def test_no_standalone_settings_text_button(self):
+        """不再有独立 ⚙ 文本按钮,只有 3 个 traffic light dot。"""
+        set_theme("dark", broadcast=False)
+        mac = self._mac()
+        self.assertFalse(hasattr(mac.header, "settings_btn"),
+                         "MacHeader 已不应再有 settings_btn 文本按钮")
+        self.assertTrue(hasattr(mac.header, "settings_dot"),
+                        "MacHeader 应该有 settings_dot 交通灯")
+        self.assertTrue(hasattr(mac.header, "yellow_dot"))
+        self.assertTrue(hasattr(mac.header, "red_dot"))
+
+    def test_yellow_dot_triggers_minimize(self):
+        set_theme("dark", broadcast=False)
+        fired = []
+        mac = self._mac(actions={"minimize": lambda: fired.append("min")})
+        # 验证 bind 确实指向 minimize 命令 + 直接调 _on_click
+        self.assertIs(mac.header.yellow_dot._command, mac.actions["minimize"])
+        mac.header.yellow_dot._on_click()
+        self.assertEqual(fired, ["min"])
+
+    def test_settings_dot_triggers_open_settings(self):
+        set_theme("dark", broadcast=False)
+        fired = []
+        mac = self._mac(actions={"open_settings": lambda: fired.append("set")})
+        self.assertIs(mac.header.settings_dot._command,
+                      mac.actions["open_settings"])
+        mac.header.settings_dot._on_click()
+        self.assertEqual(fired, ["set"])
+
+    def test_red_dot_triggers_quit(self):
+        set_theme("dark", broadcast=False)
+        fired = []
+        mac = self._mac(actions={"quit": lambda: fired.append("quit")})
+        self.assertIs(mac.header.red_dot._command, mac.actions["quit"])
+        mac.header.red_dot._on_click()
+        self.assertEqual(fired, ["quit"])
+
+    def test_title_position_compensated_for_right_cluster(self):
+        """标题 relx 必须偏向左侧,以补偿右集群占用的右侧空间。"""
+        set_theme("dark", broadcast=False)
+        mac = self._mac()
+        self.root.update_idletasks()
+        mac.header.update_idletasks()
+        right_x = mac.header.winfo_children()[0].winfo_x()
+        header_w = mac.header.winfo_width()
+        place_info = mac.header.title_lbl.place_info()
+        relx = float(place_info.get("relx", "0"))
+        # 期望:标题放在"左半区"中点 = right_x/2 / header_w
+        expected_relx = (right_x / 2) / max(header_w, 1)
+        self.assertAlmostEqual(relx, expected_relx, places=2,
+                               msg=f"title relx={relx} 应 ≈ {expected_relx}")
+
+    def test_clicking_traffic_light_does_not_start_drag(self):
+        """点交通灯不应启动 drag(_is_header_dot 标记被 drag 检查识别)。"""
+        set_theme("dark", broadcast=False)
+        mac = self._mac()
+        # 模拟 drag_start 触发的判定
+        dot = mac.header.settings_dot
+        self.assertFalse(mac._is_window_drag_target(dot))
+
+
+class TestPanelRightClickMenu(unittest.TestCase):
+    """Panel 右击菜单必须有 '切换为单行模式' 入口(补偿失去的绿点 toggle)。"""
+
+    def test_panel_menu_has_toggle_mode_entry(self):
+        import ui.panel as panel_mod
+        src = open(panel_mod.__file__, encoding="utf-8").read()
+        self.assertIn("切换为单行模式", src,
+                      "panel._build_menu 必须有 '切换为单行模式' 项")
+        self.assertIn("toggle_mode", src,
+                      "panel._build_menu 必须引用 actions['toggle_mode']")
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@
 
 import tkinter as tk
 
-from ui.theme import PALETTE, Layout, set_theme, current_choice, on_theme_change, to_tk_color, to_tk_color_blended
+from ui.theme import PALETTE, Layout, set_theme, current_choice, on_theme_change, to_tk_color
 from ui.fonts import fonts
 from ui.vibrancy import apply_window_chrome
 
@@ -28,7 +28,7 @@ MODE_ESSENTIAL = "essential"
 class TrafficLight(tk.Canvas):
     """macOS 风格的圆点按钮。hover 时显示里面的 glyph。"""
 
-    GLYPHS = {"close": "×", "minimize": "−", "expand": "↗"}
+    GLYPHS = {"close": "×", "minimize": "−", "settings": "⋯"}
 
     def __init__(self, parent, kind, color, command, size=None):
         size = size or Layout.TRAFFIC_DOT
@@ -43,17 +43,25 @@ class TrafficLight(tk.Canvas):
         self._kind = kind
         self._color = color
         self._command = command
+        self._is_header_dot = True
         self._dot = self.create_oval(1, 1, size - 1, size - 1,
                                      fill=color, outline="")
         self._glyph = self.create_text(
             size / 2, size / 2,
             text="",
             font=("Segoe UI", size - 5, "bold"),
-            fill=PALETTE.GLYPH_RED if kind == "close" else PALETTE.GLYPH_YELLOW,
+            fill=self._initial_glyph_color(),
         )
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
         self.bind("<Button-1>", self._on_click)
+
+    def _initial_glyph_color(self):
+        if self._kind == "close":
+            return PALETTE.GLYPH_RED
+        if self._kind == "settings":
+            return PALETTE.GLYPH_GREEN
+        return PALETTE.GLYPH_YELLOW
 
     def _on_enter(self, _e=None):
         self.itemconfig(self._glyph, text=self.GLYPHS.get(self._kind, ""))
@@ -68,15 +76,35 @@ class TrafficLight(tk.Canvas):
             except Exception:
                 pass
 
-    def set_color(self, color):
+    def refresh_palette(self, palette=None):
+        """主题切换时由父组件调用,刷新画布 bg + 圆点 fill + glyph fill。"""
+        palette = palette or PALETTE
         try:
-            self.itemconfig(self._dot, fill=color)
+            self.configure(bg=to_tk_color(palette.BG))
+        except tk.TclError:
+            pass
+        fill_map = {
+            "close": palette.TRAFFIC_RED,
+            "minimize": palette.TRAFFIC_YELLOW,
+            "settings": palette.TRAFFIC_GREEN,
+        }
+        glyph_map = {
+            "close": palette.GLYPH_RED,
+            "minimize": palette.GLYPH_YELLOW,
+            "settings": palette.GLYPH_GREEN,
+        }
+        try:
+            self.itemconfig(self._dot, fill=fill_map.get(self._kind, self._color))
+            self.itemconfig(self._glyph, fill=glyph_map.get(self._kind, palette.GLYPH_RED))
         except tk.TclError:
             pass
 
 
 class MacHeader(tk.Frame):
-    """macOS 风标题栏:左侧交通灯,中间标题,右侧设置按钮。"""
+    """macOS 风标题栏:中间标题,右侧三个交通灯 [黄(最小化) 绿(设置) 红(退出)]。
+
+    标题位置根据右集群实际宽度做加权补偿,放在"左半区"的中点。
+    """
 
     def __init__(self, parent, title, actions, fonts_dict,
                  on_drag_start, on_drag_motion):
@@ -85,69 +113,54 @@ class MacHeader(tk.Frame):
         self._actions = actions or {}
         self._fonts_dict = fonts_dict
 
-        left = tk.Frame(self, bg=PALETTE.BG)
-        left.pack(side="left", padx=(Layout.PAD_X, 0),
-                  pady=(Layout.HEADER_HEIGHT - Layout.TRAFFIC_DOT) / 2)
+        right = tk.Frame(self, bg=PALETTE.BG)
+        right.pack(side="right", padx=(0, Layout.PAD_X),
+                   pady=(Layout.HEADER_HEIGHT - Layout.TRAFFIC_DOT) / 2)
 
-        close_btn = TrafficLight(left, "close", PALETTE.TRAFFIC_RED,
-                                 actions.get("quit"))
-        close_btn.pack(side="left", padx=(0, Layout.TRAFFIC_GAP))
-        minimize_btn = TrafficLight(left, "minimize", PALETTE.TRAFFIC_YELLOW,
-                                    actions.get("minimize"))
-        minimize_btn.pack(side="left", padx=(0, Layout.TRAFFIC_GAP))
-        self.expand_btn = TrafficLight(left, "expand", PALETTE.TRAFFIC_GREEN,
-                                       actions.get("toggle_mode"))
-        self.expand_btn.pack(side="left")
+        # 从右往左 pack → 视觉上从左到右是 [黄, 绿, 红]
+        self.red_dot = TrafficLight(right, "close", PALETTE.TRAFFIC_RED,
+                                    actions.get("quit"))
+        self.red_dot.pack(side="right")
+
+        self.settings_dot = TrafficLight(right, "settings", PALETTE.TRAFFIC_GREEN,
+                                         actions.get("open_settings"))
+        self.settings_dot.pack(side="right", padx=(0, Layout.TRAFFIC_GAP))
+
+        self.yellow_dot = TrafficLight(right, "minimize", PALETTE.TRAFFIC_YELLOW,
+                                       actions.get("minimize"))
+        self.yellow_dot.pack(side="right", padx=(0, Layout.TRAFFIC_GAP))
 
         self.title_lbl = tk.Label(
             self, text=title, font=fonts_dict["title"],
             fg=to_tk_color(PALETTE.TEXT), bg=to_tk_color(PALETTE.BG),
         )
+        # 默认占位,after_idle 时按真实宽度重摆,避免构造时 winfo_width=1
         self.title_lbl.place(relx=0.5, rely=0.5, anchor="center")
 
-        right = tk.Frame(self, bg=PALETTE.BG)
-        right.pack(side="right", padx=(0, Layout.PAD_X),
-                   pady=(Layout.HEADER_HEIGHT - 22) / 2)
-
-        self.settings_btn = self._make_settings_btn(right, actions.get("open_settings"))
-        self.settings_btn.pack(side="right")
-
-        for w in (self, self.title_lbl, left, right):
+        for w in (self, self.title_lbl, right):
             w.bind("<Button-1>", on_drag_start, add="+")
             w.bind("<B1-Motion>", on_drag_motion, add="+")
 
-    def _make_settings_btn(self, parent, command):
-        """右侧 ⚙ 按钮:flat + 浅灰底 + hover 加深。"""
-        btn = tk.Label(
-            parent, text="⚙", cursor="hand2",
-            font=(self._fonts_dict["ui"], 13),
-            fg=to_tk_color_blended(PALETTE.TEXT_DIM),
-            bg=to_tk_color(PALETTE.BG),
-            padx=8, pady=2,
-        )
-        btn._idle_fg = to_tk_color_blended(PALETTE.TEXT_DIM)
-        btn._idle_bg = to_tk_color(PALETTE.BG)
-        btn._hover_fg = to_tk_color(PALETTE.TEXT)
-        btn._hover_bg = to_tk_color(PALETTE.CARD_HOVER)
-        btn.bind("<Enter>", lambda e: btn.config(fg=btn._hover_fg, bg=btn._hover_bg))
-        btn.bind("<Leave>", lambda e: btn.config(fg=btn._idle_fg, bg=btn._idle_bg))
-        if command:
-            btn.bind("<Button-1>", lambda e: command(), add="+")
-        return btn
+        self._right_cluster = right
+        self.bind("<Configure>", lambda _e: self.after_idle(self._reposition_title))
+        self.after_idle(self._reposition_title)
 
-    def set_settings_palette(self, fg, bg, hover_fg, hover_bg):
-        """主题切换时刷新 ⚙ 配色。"""
-        self.settings_btn._idle_fg = fg
-        self.settings_btn._idle_bg = bg
-        self.settings_btn._hover_fg = hover_fg
-        self.settings_btn._hover_bg = hover_bg
+    def _reposition_title(self):
+        """把标题放在 [左边缘, 右集群起点] 的中点,补偿右集群宽度。"""
         try:
-            self.settings_btn.config(fg=fg, bg=bg)
+            if not self.winfo_exists():
+                return
+            header_w = self.winfo_width()
+            right_x = self._right_cluster.winfo_x()
+        except tk.TclError:
+            return
+        if header_w <= 1:
+            return
+        relx = (right_x / 2) / header_w
+        try:
+            self.title_lbl.place(relx=relx, rely=0.5, anchor="center")
         except tk.TclError:
             pass
-
-    def set_expand_color(self, color):
-        self.expand_btn.set_color(color)
 
 
 class MacWindow:
@@ -206,7 +219,7 @@ class MacWindow:
         on_theme_change(self._on_theme_change)
 
     def _on_theme_change(self, choice, palette, persist):
-        """主题切换回调:重画 root/header/body/slots + 调用所有 view.refresh_palette。"""
+        """主题切换回调:重画 root/header/body/slots + 所有交通灯 + view.refresh_palette。"""
         try:
             bg = to_tk_color(palette.BG)
             self.root.configure(bg=bg)
@@ -224,9 +237,13 @@ class MacWindow:
                     f.configure(bg=bg)
                 except tk.TclError:
                     pass
-            self.header.set_settings_palette(
-                to_tk_color_blended(palette.TEXT_DIM), bg,
-                to_tk_color(palette.TEXT), to_tk_color(palette.CARD_HOVER))
+                # 第二层:刷新所有交通灯的画布 bg,修复浅色主题残留深色方框
+                for sub in f.winfo_children():
+                    if isinstance(sub, TrafficLight):
+                        try:
+                            sub.refresh_palette(palette)
+                        except Exception:
+                            pass
         except tk.TclError:
             pass
         for view in (self.standard_attached, self.essential_attached):
@@ -239,7 +256,6 @@ class MacWindow:
                 except Exception:
                     pass
         self._apply_chrome()
-        self._update_expand_button()
 
     def attach_standard(self, view):
         self.standard_attached = view
@@ -270,7 +286,6 @@ class MacWindow:
 
         self._resize_for_mode(mode)
         self._persist_mode(mode)
-        self._update_expand_button()
 
     def _show_standard(self):
         try:
@@ -358,12 +373,6 @@ class MacWindow:
                 save_v2(dict(self.cfg))
             except Exception:
                 pass
-
-    def _update_expand_button(self):
-        if self._mode == MODE_STANDARD:
-            self.header.set_expand_color(PALETTE.TRAFFIC_GREEN)
-        else:
-            self.header.set_expand_color(PALETTE.TRAFFIC_GREEN_HOVER)
 
     def apply_theme(self, name, broadcast=True, persist=True):
         """对外接口:切换主题并广播。
@@ -453,6 +462,8 @@ class MacWindow:
             if w.winfo_class() == "Button":
                 return False
             if getattr(w, "_provider_name", None):
+                return False
+            if getattr(w, "_is_header_dot", False):
                 return False
             w = getattr(w, "master", None)
         return True

@@ -445,6 +445,8 @@ class Panel:
                       command=self.actions.get("add_key", lambda: None))
         self._pause_idx = m.index("end")
         m.add_command(label="暂停轮询", command=self.actions["toggle_pause"])
+        m.add_command(label="切换为单行模式",
+                      command=self.actions.get("toggle_mode", lambda: None))
         m.add_command(label="打开配置文件", command=self.actions["open_config"])
         m.add_command(label="设置…",
                       command=self.actions.get("open_settings", lambda: None))
