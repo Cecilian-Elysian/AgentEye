@@ -26,9 +26,7 @@ MODE_ESSENTIAL = "essential"
 
 
 class TrafficLight(tk.Canvas):
-    """macOS 风格的圆点按钮。hover 时显示里面的 glyph。"""
-
-    GLYPHS = {"close": "×", "minimize": "−", "settings": "⋯"}
+    """macOS 风格的圆点按钮。无 hover 效果,鼠标变手型表示可点击。"""
 
     def __init__(self, parent, kind, color, command, size=None):
         size = size or Layout.TRAFFIC_DOT
@@ -46,28 +44,7 @@ class TrafficLight(tk.Canvas):
         self._is_header_dot = True
         self._dot = self.create_oval(1, 1, size - 1, size - 1,
                                      fill=color, outline="")
-        self._glyph = self.create_text(
-            size / 2, size / 2,
-            text="",
-            font=("Segoe UI", size - 5, "bold"),
-            fill=self._initial_glyph_color(),
-        )
-        self.bind("<Enter>", self._on_enter)
-        self.bind("<Leave>", self._on_leave)
         self.bind("<Button-1>", self._on_click)
-
-    def _initial_glyph_color(self):
-        if self._kind == "close":
-            return PALETTE.GLYPH_RED
-        if self._kind == "settings":
-            return PALETTE.GLYPH_GREEN
-        return PALETTE.GLYPH_YELLOW
-
-    def _on_enter(self, _e=None):
-        self.itemconfig(self._glyph, text=self.GLYPHS.get(self._kind, ""))
-
-    def _on_leave(self, _e=None):
-        self.itemconfig(self._glyph, text="")
 
     def _on_click(self, _e=None):
         if self._command:
@@ -77,7 +54,7 @@ class TrafficLight(tk.Canvas):
                 pass
 
     def refresh_palette(self, palette=None):
-        """主题切换时由父组件调用,刷新画布 bg + 圆点 fill + glyph fill。"""
+        """主题切换时由父组件调用,刷新画布 bg + 圆点 fill。"""
         palette = palette or PALETTE
         try:
             self.configure(bg=to_tk_color(palette.BG))
@@ -88,14 +65,8 @@ class TrafficLight(tk.Canvas):
             "minimize": palette.TRAFFIC_YELLOW,
             "settings": palette.TRAFFIC_GREEN,
         }
-        glyph_map = {
-            "close": palette.GLYPH_RED,
-            "minimize": palette.GLYPH_YELLOW,
-            "settings": palette.GLYPH_GREEN,
-        }
         try:
             self.itemconfig(self._dot, fill=fill_map.get(self._kind, self._color))
-            self.itemconfig(self._glyph, fill=glyph_map.get(self._kind, palette.GLYPH_RED))
         except tk.TclError:
             pass
 

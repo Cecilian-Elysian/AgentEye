@@ -156,6 +156,41 @@ class TestTrafficLightThemeRefresh(unittest.TestCase):
             self.assertTrue(getattr(dot, "_is_header_dot", False),
                             f"{dot._kind} 缺少 _is_header_dot 标志")
 
+    def test_traffic_light_no_glyph_item(self):
+        """TrafficLight 不再创建 text canvas item,只有 oval 圆点。"""
+        set_theme("dark", broadcast=False)
+        mac = self._mac()
+        for dot in (mac.header.yellow_dot, mac.header.settings_dot,
+                    mac.header.red_dot):
+            types = [dot.type(i) for i in dot.find_all()]
+            self.assertNotIn("text", types,
+                             f"{dot._kind} 不应有 text item,实有 {types}")
+            self.assertIn("oval", types,
+                          f"{dot._kind} 应保留 oval 圆点")
+        # 也没有 _glyph 属性了
+        for dot in (mac.header.yellow_dot, mac.header.settings_dot,
+                    mac.header.red_dot):
+            self.assertFalse(hasattr(dot, "_glyph"),
+                             f"{dot._kind} 不应再有 _glyph 属性")
+
+    def test_traffic_light_hover_event_does_nothing_visible(self):
+        """Enter/Leave 事件触发后,canvas item 列表不变(无 glyph 出现/消失)。"""
+        set_theme("dark", broadcast=False)
+        mac = self._mac()
+        for dot in (mac.header.yellow_dot, mac.header.settings_dot,
+                    mac.header.red_dot):
+            before = dot.find_all()
+            dot.event_generate("<Enter>")
+            self.root.update()
+            after_enter = dot.find_all()
+            dot.event_generate("<Leave>")
+            self.root.update()
+            after_leave = dot.find_all()
+            self.assertEqual(len(before), len(after_enter),
+                             f"{dot._kind} hover 不应新增 item")
+            self.assertEqual(len(before), len(after_leave),
+                             f"{dot._kind} leave 不应改变 item 数")
+
 
 class TestMacHeaderLayout(unittest.TestCase):
     """MacHeader 标题栏新布局:无 left,右集群 [黄绿红],标题加权补偿。"""
