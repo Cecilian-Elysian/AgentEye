@@ -130,8 +130,7 @@ def build_actions(root, cfg, state, stop, wake):
             config_mod.save_v2(cfg)
             _apply_settings_live()
 
-        SettingsDialog(root, cfg, on_save=_on_save, on_add_key=add_key,
-                       current_count=len(cfg.get("providers") or []))
+        SettingsDialog(root, cfg, on_save=_on_save, on_add_key=add_key)
 
     def _apply_settings_live():
         """设置保存后即时生效:立即唤醒 poller,新配置下次 fetch 生效。"""

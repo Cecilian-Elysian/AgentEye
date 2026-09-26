@@ -2,7 +2,7 @@
 
 入口:Header 的绿点(≡)按钮 → actions['open_settings']()
 
-布局(全部在一屏内,560×460):
+布局(全部在一屏内,560×420):
     ┌─ 设置 ────────────────────────────×
     │  主题: ○深色  ○浅色  ○跟随系统    │
     │  刷新间隔(秒):  [    ]            │
@@ -100,6 +100,9 @@ class SettingsDialog(MacToplevel):
         _refresh_settings_palette()
         try:
             self._apply_colors_to_tree()
+            # 分隔线被 _apply_colors_to_tree 当普通 Frame 刷成背景色,单独补涂
+            if getattr(self, "_sep", None) is not None:
+                self._sep.config(bg=DIM)
         except tk.TclError:
             pass
 
@@ -186,9 +189,9 @@ class SettingsDialog(MacToplevel):
         body.columnconfigure(2, weight=1)
 
         # 添加 Key 入口(指向独立 AddKeyDialog)
-        sep = tk.Frame(body, height=1, bg=DIM)
-        sep.grid(row=len(ROWS) + 1, column=0, columnspan=3, sticky="ew",
-                 pady=(12, 6))
+        self._sep = tk.Frame(body, height=1, bg=DIM)
+        self._sep.grid(row=len(ROWS) + 1, column=0, columnspan=3, sticky="ew",
+                       pady=(12, 6))
         link = tk.Label(body, text="→ 添加 API Key", bg=BG, fg=FG,
                         font=(FONT, 10, "underline"), cursor="hand2")
         link.grid(row=len(ROWS) + 2, column=0, columnspan=3, sticky="w",
@@ -225,6 +228,7 @@ class SettingsDialog(MacToplevel):
     def _save(self):
         cfg = self._cfg
         errors = []
+        validated = []
         for path, (var, vtype, lo, hi) in self._vars.items():
             raw = var.get().strip()
             try:
@@ -238,20 +242,20 @@ class SettingsDialog(MacToplevel):
             if val < lo or val > hi:
                 errors.append(f"{path}: {val} 超出范围 [{lo}, {hi}]")
                 continue
+            validated.append((path, val))
+        if errors:
+            messagebox.showerror("设置错误", "\n".join(errors), parent=self)
+            return
+        # 全部校验通过后才写入,避免校验失败时半改 cfg
+        for path, val in validated:
             parts = path.split(".")
             target = cfg
             for p in parts[:-1]:
                 target = target.setdefault(p, {})
             target[parts[-1]] = val
-
         ui = cfg.setdefault("ui", {})
-        if hasattr(self, "_theme_var"):
-            ui["theme"] = self._theme_var.get()
-            set_theme(ui["theme"], broadcast=True, persist=False)
-
-        if errors:
-            messagebox.showerror("设置错误", "\n".join(errors), parent=self)
-            return
+        ui["theme"] = self._theme_var.get()
+        set_theme(ui["theme"], broadcast=True, persist=False)
         if self._on_save:
             self._on_save(cfg)
         self.destroy()

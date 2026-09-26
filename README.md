@@ -181,7 +181,6 @@ ui/
   model_panel.py    模型列表 + 拖拽重排 + 搜索 + 分组 + 试调 + 价格计算
   add_key.py        Add Key 对话框:5 预设 + placeholder + 预览(独立窗口)
   settings_dialog.py   设置界面:刷新间隔 / ¥ 临界 / % 警告 / 主题(链接添加 Key)
-  presets.py        内置 provider 预设占位(待设置对话框接线)
 ```
 
 ## 更新日志
