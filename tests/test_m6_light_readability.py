@@ -308,5 +308,61 @@ class TestPanelRightClickMenu(unittest.TestCase):
                       "panel._build_menu 必须引用 actions['toggle_mode']")
 
 
+class TestSettingsDialogNonModal(unittest.TestCase):
+    """SettingsDialog 必须非模态,不能 grab_set,主窗口拖动才不会被吞。"""
+
+    def setUp(self):
+        self.root = tk.Tk()
+        self.root.geometry("360x400+200+200")
+
+    def tearDown(self):
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
+
+    def test_settings_dialog_does_not_grab(self):
+        """打开设置后,主窗口不应被 dialog grab,grab_current() 应为 None。"""
+        set_theme("dark", broadcast=False)
+        cfg = config_mod.load_v2()
+        MacWindow(self.root, cfg, {})
+        from ui.settings_dialog import SettingsDialog
+        dlg = SettingsDialog(self.root, cfg)
+        try:
+            # grab_current() 返回当前持有 grab 的 widget;None = 没有 grab
+            self.assertIsNone(self.root.grab_current(),
+                              "SettingsDialog 不应 grab_set,会阻塞主面板拖动")
+        finally:
+            try:
+                dlg.destroy()
+            except tk.TclError:
+                pass
+
+    def test_settings_dialog_does_not_block_main_header_click(self):
+        """打开设置后,主窗口 header 的 <Button-1> 仍能触发 drag_start 回调。"""
+        set_theme("dark", broadcast=False)
+        cfg = config_mod.load_v2()
+        mac = MacWindow(self.root, cfg, {})
+        # 在 MacHeader 创建后追加一个观察者 bind,这样不依赖 mac._drag_start
+        # 的具体引用;只要 event 触发就说明没被 grab 阻塞
+        drag_called = []
+        mac.header.bind("<Button-1>",
+                        lambda e: drag_called.append(e.widget), add="+")
+        from ui.settings_dialog import SettingsDialog
+        dlg = SettingsDialog(self.root, cfg)
+        try:
+            mac.header.event_generate("<Button-1>", x=180, y=18)
+            self.root.update()
+            self.assertGreater(len(drag_called), 0,
+                               "设置打开时主窗口 header click 应仍能触发")
+            self.assertIs(drag_called[0], mac.header,
+                          "event.widget 应是主窗口 header")
+        finally:
+            try:
+                dlg.destroy()
+            except tk.TclError:
+                pass
+
+
 if __name__ == "__main__":
     unittest.main()

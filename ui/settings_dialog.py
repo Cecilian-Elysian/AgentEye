@@ -98,7 +98,8 @@ class SettingsDialog(MacToplevel):
             pass
 
         self.update_idletasks()
-        self.grab_set()
+        # 非模态:不 grab_set(),让用户能拖动主面板、点其他视图;
+        # transient() 保证窗口始终浮在主窗口之上。
         self.focus_set()
 
     def _on_close_request(self):
