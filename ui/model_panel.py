@@ -186,6 +186,13 @@ class ModelPanel(MacToplevel):
         for w in self.inner.winfo_children():
             w.destroy()
 
+        BG = to_tk_color(PALETTE.CARD)
+        DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
+        FG = to_tk_color(PALETTE.TEXT)
+        BG_FIELD = to_tk_color(PALETTE.BAR_BG)
+        BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
+        FONT = ("Microsoft YaHei UI", 9)
+
         if not self.filtered:
             tk.Label(self.inner, text="(无匹配)", bg=BG,
                      fg=DIM, font=("Microsoft YaHei UI", 10)).pack(pady=20)
@@ -200,12 +207,7 @@ class ModelPanel(MacToplevel):
         for m in self.filtered:
             grouped.setdefault(self._group(m), []).append(m)
 
-        BG = to_tk_color(PALETTE.CARD)
-        DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
-        FG = to_tk_color(PALETTE.TEXT)
-        BG_FIELD = to_tk_color(PALETTE.BAR_BG)
-        BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
-        FONT = ("Microsoft YaHei UI", 9)
+        self.probe_result_vars = {}
 
         for group_name in ["Claude", "GPT", "Gemini", "Llama", "Qwen",
                            "DeepSeek", "GLM", "Embedding", "Image", "Audio", "其他"]:
@@ -220,8 +222,9 @@ class ModelPanel(MacToplevel):
                 tk.Label(row, text=m, bg=BG_FIELD, fg=FG,
                          font=FONT, anchor="w").pack(side="left", padx=8, pady=4)
                 if self.on_probe:
-                    self.probe_result_var = tk.StringVar(value="")
-                    tk.Label(row, textvariable=self.probe_result_var,
+                    probe_var = tk.StringVar(value="")
+                    self.probe_result_vars[m] = probe_var
+                    tk.Label(row, textvariable=probe_var,
                              bg=BG_FIELD, fg=DIM, font=(FONT[0], 8),
                              width=12, anchor="e").pack(
                         side="right", padx=4)
@@ -371,20 +374,19 @@ class ModelPanel(MacToplevel):
 
     def _probe_done(self, model, ok, latency_ms, error):
         msg = f"{'✓' if ok else '✗'} {latency_ms:.0f}ms" if ok else f"{'✗'} {error}"
-        var = getattr(self, "probe_result_var", None)
+        var = (getattr(self, "probe_result_vars", None) or {}).get(model)
         if var is not None:
             var.set(msg)
-            self.after(3000, lambda: self._clear_probe_result()
+            self.after(3000, lambda: self._clear_probe_result(var)
                        if var.get() == msg else None)
         print(f"{'✓' if ok else '✗'} {model}  {latency_ms:.0f}ms" if ok
               else f"{'✗'} {model}  {error}")
 
-    def _clear_probe_result(self):
-        if hasattr(self, "probe_result_var"):
-            try:
-                self.probe_result_var.set("")
-            except tk.TclError:
-                pass
+    def _clear_probe_result(self, var):
+        try:
+            var.set("")
+        except tk.TclError:
+            pass
 
     def _on_canvas_configure(self, event):
         try:

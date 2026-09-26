@@ -66,10 +66,15 @@ def get_models(base_url, api_key, ttl=None):
 def set_models(base_url, api_key, models):
     _ensure()
     cache = _load_json(MODELS_CACHE)
-    cache[_hash(base_url, api_key)] = {
+    key = _hash(base_url, api_key)
+    prev = cache.get(key) or {}
+    entry = {
         "models": models,
         "fetched_at": time.time(),
     }
+    if prev.get("order"):
+        entry["order"] = prev["order"]
+    cache[key] = entry
     _save_json(MODELS_CACHE, cache)
 
 
@@ -79,18 +84,13 @@ def save_model_order(base_url, api_key, order):
     cache = _load_json(MODELS_CACHE)
     key = _hash(base_url, api_key)
     entry = cache.get(key) or {"models": [], "fetched_at": time.time()}
+    models = entry.get("models") or []
+    if models:
+        order = [m for m in order if m in models]
     entry["order"] = list(order)
     entry["fetched_at"] = time.time()
     cache[key] = entry
     _save_json(MODELS_CACHE, cache)
-    # Prune order to only models that still exist
-    models = entry.get("models") or []
-    if models:
-        pruned = [m for m in order if m in models]
-        if pruned != order:
-            entry["order"] = pruned
-            cache[key] = entry
-            _save_json(MODELS_CACHE, cache)
 
 
 def invalidate_models(base_url=None, api_key=None):

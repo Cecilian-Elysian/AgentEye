@@ -11,7 +11,8 @@ import re
 import time
 import tkinter as tk
 
-from ui.theme import PALETTE, set_theme, on_theme_change, to_tk_color
+import config as config_mod
+from ui.theme import PALETTE, set_theme, on_theme_change, to_tk_color, to_tk_color_blended
 from ui.scrollbar_style import make_dark_scrollbar
 
 FONT = "Microsoft YaHei UI"
@@ -22,7 +23,7 @@ C = {
     "card_hover": to_tk_color(PALETTE.CARD_HOVER),
     "bar_bg": to_tk_color(PALETTE.BAR_BG),
     "text": to_tk_color(PALETTE.TEXT),
-    "dim": to_tk_color(PALETTE.TEXT_DIM),
+    "dim": to_tk_color_blended(PALETTE.TEXT_DIM),
     "ok": to_tk_color(PALETTE.OK),
     "warn": to_tk_color(PALETTE.WARN),
     "critical": to_tk_color(PALETTE.CRITICAL),
@@ -58,7 +59,7 @@ def _refresh_C():
     C["card_hover"] = to_tk_color(PALETTE.CARD_HOVER)
     C["bar_bg"] = to_tk_color(PALETTE.BAR_BG)
     C["text"] = to_tk_color(PALETTE.TEXT)
-    C["dim"] = to_tk_color(PALETTE.TEXT_DIM)
+    C["dim"] = to_tk_color_blended(PALETTE.TEXT_DIM)
     C["ok"] = to_tk_color(PALETTE.OK)
     C["warn"] = to_tk_color(PALETTE.WARN)
     C["critical"] = to_tk_color(PALETTE.CRITICAL)
@@ -959,7 +960,7 @@ class Panel:
     def _copy_key(self, name):
         for p in self.cfg.get("providers") or []:
             if p.get("name") == name:
-                key = p.get("key") or ""
+                key = config_mod.plain_key(p)
                 if key:
                     self.root.clipboard_clear()
                     self.root.clipboard_append(key)
@@ -983,7 +984,7 @@ class Panel:
         if not provider_cfg:
             return
         base_url = provider_cfg.get("base_url") or ""
-        key = provider_cfg.get("key") or ""
+        key = config_mod.plain_key(provider_cfg)
         models = None
         for r in (self.state.results or []):
             if r.get("name") == name:

@@ -4,7 +4,7 @@
 - 接管 Tk root,加 macOS 交通灯 + 标题 + DWM 圆角 + 系统级 backdrop
 - 提供 standard / essential 两个槽位,装载不同视图
 - 两态切换:几何尺寸 + min/max + 可见性 + 持久化
-- 绿点交通灯绑两态切换(按下 → 在 essential ↔ standard 之间切)
+- 绿点交通灯打开设置对话框(按下 → SettingsDialog)
 - 窗口拖拽边缘磁吸
 
 设计:

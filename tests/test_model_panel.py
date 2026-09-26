@@ -82,5 +82,33 @@ class AfterReorderCallback(unittest.TestCase):
         p._commit_model_drag("m1", 1)
 
 
+class EmptyFilterRender(unittest.TestCase):
+    """搜索无匹配时 _render 不得崩溃(回归:BG/DIM 未定义先使用)。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._root = tk.Tk()
+        cls._root.withdraw()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._root.destroy()
+
+    def test_no_match_renders_placeholder(self):
+        p = mp.ModelPanel(self._root, "Test", ["m1", "m2"])
+        p.search_var.set("zzz-no-match")
+        labels = [w for w in p.inner.winfo_children()
+                  if isinstance(w, tk.Label)]
+        self.assertEqual(len(labels), 1)
+        self.assertEqual(labels[0].cget("text"), "(无匹配)")
+
+    def test_probe_result_targeted_per_model(self):
+        p = mp.ModelPanel(self._root, "Test", ["m1", "m2"], on_probe=lambda m: (True, 5, ""))
+        p._probe_done("m1", True, 5.0, "")
+        var = p.probe_result_vars["m1"]
+        self.assertEqual(var.get(), "✓ 5ms")
+        self.assertEqual(p.probe_result_vars["m2"].get(), "")
+
+
 if __name__ == "__main__":
     unittest.main()

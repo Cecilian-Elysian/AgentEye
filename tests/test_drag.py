@@ -90,6 +90,18 @@ class ModelOrderCache(unittest.TestCase):
             time.sleep(0.2)
             self.assertIsNone(cache.get_models("https://x", "k1", ttl=0.1))
 
+    def test_refresh_models_preserves_order(self):
+        import os, tempfile
+        import cache
+        with tempfile.TemporaryDirectory() as d:
+            cache.CACHE_DIR = type(cache.CACHE_DIR)(d)
+            cache.MODELS_CACHE = cache.CACHE_DIR / "models.json"
+            cache.set_models("https://x", "k1", ["m1", "m2", "m3"])
+            cache.save_model_order("https://x", "k1", ["m3", "m1", "m2"])
+            cache.set_models("https://x", "k1", ["m1", "m2", "m3", "m4"])
+            result = cache.get_models("https://x", "k1")
+            self.assertEqual(result, ["m3", "m1", "m2", "m4"])
+
 
 if __name__ == "__main__":
     unittest.main()
