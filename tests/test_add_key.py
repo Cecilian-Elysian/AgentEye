@@ -1,4 +1,8 @@
-"""测试 AddKeyDialog 的 placeholder 行为 + preset 填充逻辑(无 GUI 启动)。"""
+"""测试 AddKeyForm 的 placeholder 行为 + preset 填充逻辑(无 GUI 启动)。
+
+回归:添加 Key 曾经是独立 AddKeyDialog 窗口,现已内嵌为 AddKeyForm,
+由 SettingsDialog 同窗口切换视图承载。
+"""
 import unittest
 from unittest import mock
 
@@ -17,57 +21,70 @@ class PlaceholderLogic(unittest.TestCase):
     def tearDownClass(cls):
         cls._root.destroy()
 
-    def _make_dialog(self):
-        d = mock.MagicMock()
-        d.url_var = tk.StringVar()
-        d.key_var = tk.StringVar()
-        d.name_var = tk.StringVar()
-        d._url_placeholder = True
-        d._key_placeholder = True
-        d._probe_thread = None
-        return d
+    def _make_form(self):
+        f = mock.MagicMock()
+        f.url_var = tk.StringVar()
+        f.key_var = tk.StringVar()
+        f.name_var = tk.StringVar()
+        f._url_placeholder = True
+        f._key_placeholder = True
+        f._probe_thread = None
+        return f
 
     def test_apply_preset_minimax(self):
-        d = self._make_dialog()
-        ak.AddKeyDialog._apply_preset(d, "minimax",
-                                      "https://api.minimaxi.com", "MiniMax")
-        self.assertEqual(d.url_var.get(), "https://api.minimaxi.com")
-        self.assertEqual(d.name_var.get(), "MiniMax")
-        self.assertFalse(d._url_placeholder)
+        f = self._make_form()
+        ak.AddKeyForm._apply_preset(f, "minimax",
+                                    "https://api.minimaxi.com", "MiniMax")
+        self.assertEqual(f.url_var.get(), "https://api.minimaxi.com")
+        self.assertEqual(f.name_var.get(), "MiniMax")
+        self.assertFalse(f._url_placeholder)
 
     def test_apply_preset_relay_empty_url(self):
-        d = self._make_dialog()
-        ak.AddKeyDialog._apply_preset(d, "relay", "", "中转站")
-        self.assertEqual(d.url_var.get(), "")
-        self.assertEqual(d.name_var.get(), "中转站")
+        f = self._make_form()
+        ak.AddKeyForm._apply_preset(f, "relay", "", "中转站")
+        self.assertEqual(f.url_var.get(), "")
+        self.assertEqual(f.name_var.get(), "中转站")
 
     def test_apply_preset_keeps_existing_name(self):
-        d = self._make_dialog()
-        d.name_var.set("我的小号")
-        ak.AddKeyDialog._apply_preset(d, "deepseek",
-                                      "https://api.deepseek.com", "DeepSeek")
-        self.assertEqual(d.name_var.get(), "我的小号")  # 已有名称不被覆盖
+        f = self._make_form()
+        f.name_var.set("我的小号")
+        ak.AddKeyForm._apply_preset(f, "deepseek",
+                                    "https://api.deepseek.com", "DeepSeek")
+        self.assertEqual(f.name_var.get(), "我的小号")  # 已有名称不被覆盖
 
     def test_save_blocks_when_placeholder_active(self):
-        d = self._make_dialog()
-        d._key_placeholder = True
+        f = self._make_form()
+        f._key_placeholder = True
         called = []
-        d.on_save = lambda e: called.append(e)
-        ak.AddKeyDialog._save(d)
+        f.on_save = lambda e: called.append(e)
+        ak.AddKeyForm._save(f)
         self.assertEqual(called, [])  # placeholder 时 save 被忽略
 
     def test_save_uses_empty_url_when_placeholder(self):
-        d = self._make_dialog()
-        d._key_placeholder = False
-        d._url_placeholder = True
-        d.key_var.set("sk-test123")
-        d.name_var.set("测试")
+        f = self._make_form()
+        f._key_placeholder = False
+        f._url_placeholder = True
+        f.key_var.set("sk-test123")
+        f.name_var.set("测试")
         called = []
-        d.on_save = lambda e: called.append(e)
-        ak.AddKeyDialog._save(d)
+        f.on_save = lambda e: called.append(e)
+        ak.AddKeyForm._save(f)
         self.assertEqual(len(called), 1)
         self.assertEqual(called[0]["base_url"], "")
         self.assertEqual(called[0]["key"], "sk-test123")
+
+    def test_save_fires_done_callback(self):
+        f = self._make_form()
+        f._key_placeholder = False
+        f._url_placeholder = False
+        f.key_var.set("sk-x")
+        f.name_var.set("n")
+        saved, done = [], []
+        f.on_save = lambda e: saved.append(e)
+        f.on_done = lambda: done.append(1)
+        ak.AddKeyForm._save(f)
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(done, [1])
 
 
 class PresetList(unittest.TestCase):

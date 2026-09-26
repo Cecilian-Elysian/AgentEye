@@ -1,4 +1,8 @@
-"""Add Key 对话框:粘贴 key → 自动探测 → 预览 → 保存。
+"""Add Key 表单(可内嵌,非独立窗口)。
+
+粘贴 key → 自动探测 → 预览 → 保存。宿主决定容器:
+- ui/settings_dialog.py 在同一窗口内切换「设置 ↔ 添加 Key」两个视图
+- 面板工具栏的"添加"入口也走设置对话框,不再弹独立窗口
 
 流程:
   0. 顶部一行 5 个 provider 预设按钮 (MiniMax/DeepSeek/智谱/OpenCode/中转站),
@@ -7,17 +11,15 @@
   2. FocusOut 触发 detect + 通用探测(超时 8s)
   3. 预览区显示识别结果 + 模型数 + 余额快照
   4. 用户填名称,点"保存"
-  5. 写入 config (通过 on_save 回调),关闭对话框
+  5. 回调 on_save(entry),随后 on_done()(宿主决定去向)
 """
 
 import threading
 import time
 import tkinter as tk
-from tkinter import ttk
 
 from providers import detect as detect_mod
-from ui.theme import PALETTE, to_tk_color, to_tk_color_blended
-from ui.mac_toplevel import MacToplevel
+from ui.theme import PALETTE, on_theme_change, to_tk_color, to_tk_color_blended
 
 
 PRESETS = [
@@ -28,94 +30,80 @@ PRESETS = [
     ("中转站",     "relay",       ""),
 ]
 
+FONT = "Microsoft YaHei UI"
 
-class AddKeyDialog(MacToplevel):
+
+class AddKeyForm(tk.Frame):
     PROBE_TIMEOUT = 8.0
 
-    def __init__(self, parent, on_save, generic_probe=None, current_count=0):
-        super().__init__(
-            parent, title=f"添加 Key  ·  当前已配置 {current_count} 个",
-            on_close=self._on_close_request,
-            show_minimize=False,
-            width=540, height=560,
-            resizable=False,
-        )
-        self.transient(parent)
-
+    def __init__(self, parent, on_save=None, on_done=None, generic_probe=None,
+                 current_count=0, show_count=True):
+        super().__init__(parent, bg=to_tk_color(PALETTE.BG))
         self.on_save = on_save
+        self.on_done = on_done
         self.generic_probe = generic_probe or _generic_probe_stub
         self._probe_thread = None
         self._probe_result = None
         self._probe_started_at = 0.0
+        self._show_count = show_count
 
-        self._build_ui()
-        self._bind_shortcuts()
+        self._build_ui(current_count)
+        on_theme_change(self.refresh_palette)
 
-        self.update_idletasks()
-        self.grab_set()
-        self.focus_set()
+    # ---------- 配色 ----------
 
-    def _on_close_request(self):
+    def refresh_palette(self, *_args):
+        """主题切换时重画表单配色。"""
         try:
-            self.destroy()
+            if not self.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        try:
+            self._walk_recolor(self)
         except tk.TclError:
             pass
 
-    def refresh_palette(self):
-        """主题切换时同步本地常量 + 重画 body。"""
-        try:
-            self._redraw_colors()
-        except tk.TclError:
-            pass
-
-    def _redraw_colors(self):
-        BG = to_tk_color(PALETTE.CARD)
+    def _walk_recolor(self, w):
+        BG = to_tk_color(PALETTE.BG)
+        BG_FIELD = to_tk_color(PALETTE.BAR_BG)
         FG = to_tk_color(PALETTE.TEXT)
         DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
-        BG_FIELD = to_tk_color(PALETTE.BAR_BG)
         BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
         BTN_HOVER = to_tk_color(PALETTE.CARD_PRESSED)
         OK = to_tk_color(PALETTE.OK)
         FG_ON_OK = to_tk_color(PALETTE.BG)
 
-        def walk(w):
-            try:
-                cls = w.winfo_class()
-                if cls == "Frame":
-                    if w.cget("bg") not in ("",):
-                        w.configure(bg=BG)
-                elif cls == "Label":
-                    fg = str(w.cget("fg") or "").upper()
-                    if fg in (DIM.upper(), "#8B8B9E"):
-                        w.configure(bg=BG, fg=DIM)
-                    elif fg == OK.upper():
-                        w.configure(bg=BTN_BG, fg=OK)
-                    else:
-                        w.configure(bg=BG, fg=FG)
-                elif cls == "Entry":
-                    w.configure(bg=BG_FIELD, fg=FG, insertbackground=FG)
-                elif cls == "Button":
-                    fg = str(w.cget("fg") or "").upper()
-                    if fg == FG_ON_OK.upper():
-                        w.configure(bg=OK, fg=FG_ON_OK)
-                    else:
-                        w.configure(bg=BTN_BG, fg=FG)
-            except tk.TclError:
-                pass
-            for c in w.winfo_children():
-                walk(c)
-
         try:
-            cls = self.body.winfo_class()
-            if cls == "Frame":
-                self.body.configure(bg=BG)
+            cls = w.winfo_class()
+            if cls in ("Frame", "Toplevel"):
+                w.configure(bg=BG)
+            elif cls == "Label":
+                fg = str(w.cget("fg") or "").upper()
+                if fg in (DIM.upper(), "#8B8B9E"):
+                    w.configure(bg=BG, fg=DIM)
+                elif fg == OK.upper():
+                    w.configure(bg=BG, fg=OK)
+                else:
+                    w.configure(bg=BG, fg=FG)
+            elif cls == "Entry":
+                w.configure(bg=BG_FIELD, fg=FG, insertbackground=FG)
+            elif cls == "Button":
+                fg = str(w.cget("fg") or "").upper()
+                if fg == FG_ON_OK.upper():
+                    w.configure(bg=OK, fg=FG_ON_OK)
+                else:
+                    w.configure(bg=BTN_BG, fg=FG)
         except tk.TclError:
             pass
-        walk(self.body)
+        for c in w.winfo_children():
+            self._walk_recolor(c)
 
-    def _build_ui(self):
+    # ---------- UI ----------
+
+    def _build_ui(self, current_count):
         PAD = {"padx": 12, "pady": 6}
-        BG = to_tk_color(PALETTE.CARD)
+        BG = to_tk_color(PALETTE.BG)
         FG = to_tk_color(PALETTE.TEXT)
         DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
         BG_FIELD = to_tk_color(PALETTE.BAR_BG)
@@ -123,32 +111,35 @@ class AddKeyDialog(MacToplevel):
         BTN_HOVER = to_tk_color(PALETTE.CARD_PRESSED)
         OK = to_tk_color(PALETTE.OK)
         FG_ON_OK = to_tk_color(PALETTE.BG)
-        FONT = ("Microsoft YaHei UI", 10)
-        FONT_S = ("Microsoft YaHei UI", 9)
 
-        body = tk.Frame(self.body, bg=BG)
-        body.pack(fill="both", expand=True, padx=14, pady=12)
+        top_row = tk.Frame(self, bg=BG)
+        top_row.pack(fill="x", padx=4, pady=(0, 4))
+        count_text = f"当前已配置 {current_count} 个" if self._show_count else ""
+        tk.Label(top_row, text=count_text, bg=BG, fg=DIM,
+                 font=(FONT, 9)).pack(side="right")
 
-        tk.Label(body, text="快速选择", bg=BG, fg=DIM, font=FONT).grid(
-            row=0, column=0, sticky="w", pady=(2, 4))
-        preset_frame = tk.Frame(body, bg=BG)
-        preset_frame.grid(row=0, column=1, columnspan=2, sticky="w", pady=(2, 4))
-        for i, (label, kind, url) in enumerate(PRESETS):
-            b = tk.Label(preset_frame, text=label, font=FONT_S,
+        tk.Label(self, text="快速选择", bg=BG, fg=DIM,
+                 font=(FONT, 10)).pack(anchor="w", padx=4, pady=(2, 4))
+        preset_frame = tk.Frame(self, bg=BG)
+        preset_frame.pack(anchor="w", padx=4)
+        for label, kind, url in PRESETS:
+            b = tk.Label(preset_frame, text=label, font=(FONT, 9),
                          bg=BTN_BG, fg=FG, padx=10, pady=4, cursor="hand2")
-            b.grid(row=0, column=i, padx=(0, 6))
+            b.pack(side="left", padx=(0, 6))
             b.bind("<Button-1>",
                    lambda e, k=kind, u=url, lbl=label: self._apply_preset(k, u, lbl))
             b.bind("<Enter>", lambda e, w=b: w.config(bg=BTN_HOVER))
             b.bind("<Leave>", lambda e, w=b: w.config(bg=BTN_BG))
 
-        tk.Label(body, text="Base URL (可选)", bg=BG, fg=DIM, font=FONT).grid(
-            row=1, column=0, sticky="w", **PAD)
+        row_url = tk.Frame(self, bg=BG)
+        row_url.pack(fill="x", pady=(8, 0))
+        tk.Label(row_url, text="Base URL (可选)", bg=BG, fg=DIM,
+                 font=(FONT, 10)).pack(side="left")
         self.url_var = tk.StringVar()
-        self.url_entry = tk.Entry(body, textvariable=self.url_var, width=44,
+        self.url_entry = tk.Entry(row_url, textvariable=self.url_var, width=36,
                                   bg=BG_FIELD, fg=FG, insertbackground=FG,
-                                  font=FONT, relief="flat")
-        self.url_entry.grid(row=1, column=1, sticky="ew", **PAD)
+                                  font=(FONT, 10), relief="flat")
+        self.url_entry.pack(side="left", padx=8, fill="x", expand=True)
         self.url_entry.insert(0, "")
         self.url_entry.config(foreground=DIM)
         self._url_placeholder = False
@@ -156,13 +147,16 @@ class AddKeyDialog(MacToplevel):
         self.url_entry.bind("<FocusOut>", self._url_focus_out)
         self.url_entry.bind("<FocusOut>", lambda e: self._schedule_probe(), add="+")
 
-        tk.Label(body, text="API Key", bg=BG, fg=FG, font=FONT).grid(
-            row=2, column=0, sticky="w", **PAD)
+        row_key = tk.Frame(self, bg=BG)
+        row_key.pack(fill="x", pady=(4, 0))
+        tk.Label(row_key, text="API Key", bg=BG, fg=FG,
+                 font=(FONT, 10)).pack(side="left")
         self.key_var = tk.StringVar()
-        self.key_entry = tk.Entry(body, textvariable=self.key_var, width=44,
+        self.key_entry = tk.Entry(row_key, textvariable=self.key_var, width=36,
                                   bg=BG_FIELD, fg=FG,
-                                  insertbackground=FG, font=FONT, relief="flat")
-        self.key_entry.grid(row=2, column=1, sticky="ew", **PAD)
+                                  insertbackground=FG, font=(FONT, 10),
+                                  relief="flat")
+        self.key_entry.pack(side="left", padx=8, fill="x", expand=True)
         self.key_entry.insert(0, "sk-... 粘贴 key")
         self.key_entry.config(foreground=DIM)
         self._key_placeholder = True
@@ -170,45 +164,44 @@ class AddKeyDialog(MacToplevel):
         self.key_entry.bind("<FocusOut>", self._key_focus_out)
         self.key_entry.bind("<FocusOut>", lambda e: self._schedule_probe(), add="+")
         self.key_entry.bind("<KeyRelease>", lambda e: self._schedule_probe(delay=0.6))
+        self.key_entry.bind("<Return>", lambda e: self._save()
+                            if str(self.save_btn["state"]) == "normal" else None)
 
-        self.detect_btn = tk.Button(body, text="探测", command=self._probe_now,
+        self.detect_btn = tk.Button(row_url, text="探测", command=self._probe_now,
                                     bg=BTN_BG, fg=FG, relief="flat",
-                                    activebackground=BTN_HOVER, font=FONT)
-        self.detect_btn.grid(row=1, column=2, rowspan=2, sticky="ns", padx=8)
+                                    activebackground=BTN_HOVER, font=(FONT, 10))
+        self.detect_btn.pack(side="right", padx=(8, 0))
 
-        sep = tk.Frame(body, height=1, bg=BTN_HOVER)
-        sep.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 4))
+        sep = tk.Frame(self, height=1, bg=BTN_HOVER)
+        sep.pack(fill="x", pady=(8, 4))
 
-        tk.Label(body, text="识别结果", bg=BG, fg=DIM, font=FONT).grid(
-            row=4, column=0, sticky="nw", **PAD)
-        self.preview = tk.Text(body, height=8, width=50, bg=BG_FIELD, fg=FG,
-                               font=FONT_S, relief="flat",
+        tk.Label(self, text="识别结果", bg=BG, fg=DIM,
+                 font=(FONT, 10)).pack(anchor="w", padx=4)
+        self.preview = tk.Text(self, height=7, bg=BG_FIELD, fg=FG,
+                               font=(FONT, 9), relief="flat",
                                wrap="word", state="disabled")
-        self.preview.grid(row=4, column=1, columnspan=2, sticky="ew", **PAD)
+        self.preview.pack(fill="x", padx=4, pady=(2, 4))
 
-        tk.Label(body, text="显示名称", bg=BG, fg=FG, font=FONT).grid(
-            row=5, column=0, sticky="w", **PAD)
+        row_name = tk.Frame(self, bg=BG)
+        row_name.pack(fill="x", pady=(2, 0))
+        tk.Label(row_name, text="显示名称", bg=BG, fg=FG,
+                 font=(FONT, 10)).pack(side="left")
         self.name_var = tk.StringVar()
-        tk.Entry(body, textvariable=self.name_var, width=44,
+        tk.Entry(row_name, textvariable=self.name_var, width=36,
                  bg=BG_FIELD, fg=FG, insertbackground=FG,
-                 font=FONT, relief="flat").grid(row=5, column=1, columnspan=2,
-                                                sticky="ew", **PAD)
+                 font=(FONT, 10), relief="flat").pack(
+            side="left", padx=8, fill="x", expand=True)
 
-        sep2 = tk.Frame(body, height=1, bg=BTN_HOVER)
-        sep2.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(8, 4))
-
-        btn_frame = tk.Frame(body, bg=BG)
-        btn_frame.grid(row=7, column=0, columnspan=3, sticky="e", pady=(4, 0))
-        tk.Button(btn_frame, text="取消", command=self.destroy,
-                  bg=BTN_BG, fg=FG, relief="flat", font=FONT,
-                  width=10).pack(side="right", padx=(8, 0))
+        btn_frame = tk.Frame(self, bg=BG)
+        btn_frame.pack(fill="x", pady=(10, 0))
         self.save_btn = tk.Button(btn_frame, text="保存", command=self._save,
                                   bg=OK, fg=FG_ON_OK, relief="flat",
-                                  font=FONT, width=10, state="disabled")
+                                  font=(FONT, 10), width=10, state="disabled")
         self.save_btn.pack(side="right")
 
-        body.columnconfigure(1, weight=1)
         self._set_preview("等待输入 key …")
+
+    # ---------- placeholder ----------
 
     def _url_focus_in(self, e):
         if self._url_placeholder:
@@ -236,6 +229,8 @@ class AddKeyDialog(MacToplevel):
             self.key_entry.config(foreground="#8b8b9e", show="")
             self._key_placeholder = True
 
+    # ---------- 逻辑 ----------
+
     def _apply_preset(self, kind, url, label):
         if self._url_placeholder:
             self._url_focus_out(None)
@@ -245,10 +240,6 @@ class AddKeyDialog(MacToplevel):
         if not self.name_var.get().strip():
             self.name_var.set(label)
         self.key_entry.focus_set()
-
-    def _bind_shortcuts(self):
-        self.bind("<Escape>", lambda e: self.destroy())
-        self.bind("<Return>", lambda e: self._save() if self.save_btn["state"] == "normal" else None)
 
     def _set_preview(self, text):
         self.preview.config(state="normal")
@@ -285,14 +276,8 @@ class AddKeyDialog(MacToplevel):
     def _probe_worker(self, key, url):
         detected = detect_mod.detect(key, url)
         probe_result = None
-        if detected["kind"] == "generic_openai" and detected["base_url"]:
-            try:
-                probe_result = self.generic_probe(detected["base_url"], key,
-                                                  timeout=self.PROBE_TIMEOUT)
-            except Exception as e:
-                probe_result = {"error": str(e)}
-        elif detected["kind"] in ("minimax", "deepseek", "zhipu", "opencode_go",
-                                  "generic_openai") and detected["base_url"]:
+        if detected["kind"] in ("minimax", "deepseek", "zhipu", "opencode_go",
+                                "generic_openai") and detected["base_url"]:
             try:
                 probe_result = self.generic_probe(detected["base_url"], key,
                                                   timeout=self.PROBE_TIMEOUT)
@@ -347,12 +332,15 @@ class AddKeyDialog(MacToplevel):
         name = self.name_var.get().strip() or "未命名"
         if not key:
             return
-        self.on_save({
+        entry = {
             "name": name,
             "key": key,
             "base_url": url,
-        })
-        self.destroy()
+        }
+        if self.on_save:
+            self.on_save(entry)
+        if self.on_done:
+            self.on_done()
 
 
 def _generic_probe_stub(base_url, key, timeout=8.0):

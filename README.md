@@ -32,7 +32,7 @@
 
 ### 配置与管理
 
-- **设置界面**:Header `≡` 打开,改刷新间隔、¥ 临界阈值、% 告警阈值 + 主题切换;链接 "添加 API Key" 跳转独立 AddKeyDialog(5 预设 + 自动探测 + 连续添加)
+- **设置界面**:Header `≡` 打开,改刷新间隔、¥ 临界阈值、% 告警阈值 + 主题切换;"添加 API Key" 在同一窗口内切换视图(5 预设 + 自动探测),不弹独立窗口
 - **删除确认**:右键删除 provider 需输入名字确认,同时清理 models 缓存并追加 probe 日志标记
 - **首启欢迎 toast**:首次启动给出操作提示
 - **v1 自动迁移**:旧的 5 个分立数组配置自动升级为统一 `providers[]`,备份为 `config.json.v1.bak`
@@ -179,11 +179,18 @@ ui/
   row_menu.py       行右键菜单(删除走输入名字确认)
   confirm_delete.py 危险操作确认:输入名字才能确认
   model_panel.py    模型列表 + 拖拽重排 + 搜索 + 分组 + 试调 + 价格计算
-  add_key.py        Add Key 对话框:5 预设 + placeholder + 预览(独立窗口)
-  settings_dialog.py   设置界面:刷新间隔 / ¥ 临界 / % 警告 / 主题(链接添加 Key)
+  add_key.py        Add Key 表单:5 预设 + placeholder + 预览(内嵌组件,
+                    由 settings_dialog 同窗口承载,无独立窗口)
+  settings_dialog.py   设置界面:刷新间隔 / ¥ 临界 / % 警告 / 主题;
+                    "添加 API Key" 原地切换到添加视图
 ```
 
 ## 更新日志
+
+### v2.3 (添加 Key 内嵌)
+
+- `refactor(ui)`:删除独立 AddKeyDialog 窗口,重构为可内嵌 AddKeyForm;SettingsDialog 同窗口切换「设置 ↔ 添加 Key」视图
+- `refactor(main)`:面板工具栏"添加"入口 → 直接打开设置对话框的添加视图(initial_view)
 
 ### v2.2 (设置界面简化)
 

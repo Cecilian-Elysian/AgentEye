@@ -2,7 +2,8 @@
 
 - MacToplevel 子类继承时能创建,带交通灯 + body
 - MacToplevel 主题切换会触发 refresh_palette
-- SettingsDialog / AddKeyDialog / ConfirmDeleteDialog / ModelPanel 都继承 MacToplevel
+- SettingsDialog / ConfirmDeleteDialog / ModelPanel 继承 MacToplevel;
+  AddKeyForm 内嵌于 SettingsDialog(不再有独立添加窗口)
 - 关闭按钮 → destroy
 - EssentialBar › 点击 → on_open_models 触发
 - Panel 行拖拽指示器颜色为蓝色
@@ -207,7 +208,11 @@ class TestSettingsDialogMacMode(unittest.TestCase):
                 pass
 
 
-class TestAddKeyDialogMacMode(unittest.TestCase):
+class TestAddKeyFormEmbedded(unittest.TestCase):
+    """添加 Key 已内嵌为 AddKeyForm(tk.Frame),不再是独立窗口。
+
+    SettingsDialog 同窗口切换「设置 ↔ 添加 Key」两个视图。
+    """
 
     def setUp(self):
         set_theme("dark", broadcast=False, persist=False)
@@ -220,30 +225,56 @@ class TestAddKeyDialogMacMode(unittest.TestCase):
         except tk.TclError:
             pass
 
-    def test_inherits_mactoplevel(self):
-        from ui.add_key import AddKeyDialog
-        from ui.mac_toplevel import MacToplevel
-        self.assertTrue(issubclass(AddKeyDialog, MacToplevel))
+    def test_form_is_frame_not_toplevel(self):
+        from ui.add_key import AddKeyForm
+        self.assertTrue(issubclass(AddKeyForm, tk.Frame))
 
-    def test_creates_with_count(self):
-        from ui.add_key import AddKeyDialog
-        dlg = AddKeyDialog(self.root, on_save=lambda e: None, current_count=3)
+    def test_form_creates_with_presets(self):
+        from ui.add_key import AddKeyForm
+        form = AddKeyForm(self.root, current_count=3)
         try:
-            self.assertIn("3", dlg.title())
-            self.assertTrue(hasattr(dlg, "body"))
+            labels = [w for w in form.winfo_children()
+                      if isinstance(w, tk.Frame)]
+            self.assertTrue(labels)  # 至少有 top_row / preset_frame 等子帧
+            self.assertTrue(hasattr(form, "key_var"))
+            self.assertTrue(hasattr(form, "save_btn"))
+        finally:
+            try:
+                form.destroy()
+            except tk.TclError:
+                pass
+
+    def test_settings_dialog_swaps_to_add_view(self):
+        from ui.settings_dialog import SettingsDialog
+        from ui.add_key import AddKeyForm
+        cfg = {"providers": [{"name": "a", "key": "k"}]}
+        dlg = SettingsDialog(self.root, cfg, initial_view="add_key")
+        try:
+            self.assertIn("添加", dlg.title())
+            self.assertIsInstance(dlg._form, AddKeyForm)
+            # 原地返回设置视图
+            dlg._show_settings_view()
+            self.assertIn("设置", dlg.title())
+            self.assertIsNone(dlg._form)
         finally:
             try:
                 dlg.destroy()
             except tk.TclError:
                 pass
 
-    def test_redraw_colors_no_crash(self):
-        from ui.add_key import AddKeyDialog
-        dlg = AddKeyDialog(self.root, on_save=lambda e: None, current_count=0)
+    def test_settings_dialog_add_entry_saved_closes(self):
+        from ui.settings_dialog import SettingsDialog
+        from ui.add_key import AddKeyForm
+        cfg = {"providers": []}
+        received = []
+        dlg = SettingsDialog(self.root, cfg,
+                             on_add_key=lambda e: received.append(e),
+                             initial_view="add_key")
         try:
-            set_theme("light", broadcast=False)
-            dlg._redraw_colors()
-            self.assertTrue(True)
+            self.assertIsInstance(dlg._form, AddKeyForm)
+            dlg._handle_entry_saved({"name": "n", "key": "sk-x", "base_url": ""})
+            self.assertEqual(len(received), 1)
+            self.assertFalse(bool(dlg.winfo_exists()))
         finally:
             try:
                 dlg.destroy()

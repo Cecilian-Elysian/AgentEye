@@ -9,7 +9,6 @@ import notify
 import cache as cache_mod
 from providers import fetch_all
 from ui import Panel
-from ui.add_key import AddKeyDialog
 from ui.app import MacWindow
 from ui.essential_bar import EssentialBar
 
@@ -121,7 +120,7 @@ def build_actions(root, cfg, state, stop, wake):
         except OSError:
             pass
 
-    def open_settings():
+    def open_settings(view=None):
         from ui.settings_dialog import SettingsDialog
 
         def _on_save(new_cfg):
@@ -130,7 +129,8 @@ def build_actions(root, cfg, state, stop, wake):
             config_mod.save_v2(cfg)
             _apply_settings_live()
 
-        SettingsDialog(root, cfg, on_save=_on_save, on_add_key=add_key)
+        SettingsDialog(root, cfg, on_save=_on_save,
+                       on_add_key=add_key_entry, initial_view=view)
 
     def _apply_settings_live():
         """设置保存后即时生效:立即唤醒 poller,新配置下次 fetch 生效。"""
@@ -186,26 +186,27 @@ def build_actions(root, cfg, state, stop, wake):
             pass
 
     def add_key():
-        def _on_save(entry):
-            kind = _infer_kind_from_dialog(entry)
-            new_provider = {
-                "id": uuid.uuid4().hex[:12],
-                "kind": kind,
-                "name": entry.get("name", "未命名"),
-                "key": entry.get("key", ""),
-                "base_url": entry.get("base_url", ""),
-                "extra": {},
-            }
-            cfg.setdefault("providers", []).append(new_provider)
-            config_mod.save_v2(cfg)
-            try:
-                import notify as notify_mod
-                notify_mod.alert("AgentEye", f"已添加:{new_provider['name']}")
-            except Exception:
-                pass
-            wake.set()
-        count = len(cfg.get("providers") or [])
-        AddKeyDialog(root, on_save=_on_save, current_count=count)
+        """添加 Key 入口(面板工具栏)→ 设置对话框的添加视图,不开独立窗口。"""
+        open_settings("add_key")
+
+    def add_key_entry(entry):
+        kind = _infer_kind_from_dialog(entry)
+        new_provider = {
+            "id": uuid.uuid4().hex[:12],
+            "kind": kind,
+            "name": entry.get("name", "未命名"),
+            "key": entry.get("key", ""),
+            "base_url": entry.get("base_url", ""),
+            "extra": {},
+        }
+        cfg.setdefault("providers", []).append(new_provider)
+        config_mod.save_v2(cfg)
+        try:
+            import notify as notify_mod
+            notify_mod.alert("AgentEye", f"已添加:{new_provider['name']}")
+        except Exception:
+            pass
+        wake.set()
 
     def delete_provider(name):
         providers = cfg.get("providers") or []

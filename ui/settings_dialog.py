@@ -1,16 +1,23 @@
-"""设置对话框:仅保留最常用的 3 项 + 主题切换 + 添加 Key 入口。
+"""设置对话框:仅保留最常用的 3 项 + 主题切换 + 内嵌添加 Key 视图。
 
 入口:Header 的绿点(≡)按钮 → actions['open_settings']()
 
-布局(全部在一屏内,560×420):
+同一窗口内两个视图(560 宽,高度随视图切换):
+    [设置视图 560×430]
     ┌─ 设置 ────────────────────────────×
     │  主题: ○深色  ○浅色  ○跟随系统    │
     │  刷新间隔(秒):  [    ]            │
     │  金额临界阈值(¥): [    ]          │
     │  百分比告警阈值(%): [    ]        │
     │  ──────────────────────────────    │
-    │  → 添加 API Key                    │  ← 打开独立的 AddKeyDialog
+    │  → 添加 API Key                    │  ← 原地切到添加视图,不开独立窗口
     │                  [取消] [保存设置]  │
+    └────────────────────────────────────┘
+    [添加视图 560×580]
+    ┌─ 添加 Key ────────────────────────×
+    │  ← 返回设置                        │
+    │  (AddKeyForm:预设/BaseURL/Key/     │
+    │   探测预览/名称/保存)              │
     └────────────────────────────────────┘
 """
 import tkinter as tk
@@ -18,6 +25,9 @@ from tkinter import messagebox
 
 from ui.theme import PALETTE, set_theme, current_choice, to_tk_color, to_tk_color_blended
 from ui.mac_toplevel import MacToplevel
+
+VIEW_SETTINGS = "settings"
+VIEW_ADD_KEY = "add_key"
 
 
 FONT = "Microsoft YaHei UI"
@@ -59,12 +69,13 @@ DEFAULTS = {
 
 
 class SettingsDialog(MacToplevel):
-    def __init__(self, parent, cfg, on_save=None, on_add_key=None):
+    def __init__(self, parent, cfg, on_save=None, on_add_key=None,
+                 initial_view=None):
         super().__init__(
             parent, title="设置",
             on_close=self._on_close_request,
             show_minimize=False,
-            width=560, height=420,
+            width=560, height=430,
             resizable=False,
         )
         self.transient(parent)
@@ -72,8 +83,14 @@ class SettingsDialog(MacToplevel):
         self._cfg = cfg
         self._on_save = on_save
         self._on_add_key = on_add_key
+        self._form = None
+        self._sep = None
+        self._body_inner = None
 
-        self._build_ui()
+        self._holder = tk.Frame(self.body, bg=BG)
+        self._holder.pack(fill="both", expand=True)
+
+        self._init_vars()
         self._load()
         self._bind_shortcuts()
 
@@ -89,6 +106,18 @@ class SettingsDialog(MacToplevel):
         # transient() 保证窗口始终浮在主窗口之上。
         self.focus_set()
 
+        if initial_view == VIEW_ADD_KEY:
+            self._show_add_view()
+        else:
+            self._show_settings_view()
+
+    def _init_vars(self):
+        """主题 var + 3 个设置项的 StringVar,独立于视图构建,供 _load 使用。"""
+        self._theme_var = tk.StringVar(value=current_choice())
+        self._vars = {}
+        for label, path, hint, lo, hi, vtype in ROWS:
+            self._vars[path] = (tk.StringVar(), vtype, lo, hi)
+
     def _on_close_request(self):
         try:
             self.destroy()
@@ -96,7 +125,7 @@ class SettingsDialog(MacToplevel):
             pass
 
     def refresh_palette(self):
-        """主题切换时同步本地常量 + 重画 SettingsDialog 自己的 widget 配色。"""
+        """主题切换时同步本地常量 + 重画当前视图的 widget 配色。"""
         _refresh_settings_palette()
         try:
             self._apply_colors_to_tree()
@@ -107,11 +136,16 @@ class SettingsDialog(MacToplevel):
             pass
 
     def _apply_colors_to_tree(self, root=None):
-        """遍历 self.body 子树,按 widget class 套用 PALETTE 配色。"""
+        """遍历当前视图子树,按 widget class 套用 PALETTE 配色。
+
+        AddKeyForm 子树跳过 —— 表单自己注册了 on_theme_change,自管配色。
+        """
         if root is None:
-            root = getattr(self, "_body_inner", None)
+            root = self._body_inner
             if root is None:
                 return
+        if root is getattr(self, "_form", None):
+            return
         try:
             cls = root.winfo_class()
             if cls in ("Frame", "Toplevel"):
@@ -147,13 +181,62 @@ class SettingsDialog(MacToplevel):
                 pass
             self._apply_colors_to_tree(w)
 
-    def _build_ui(self):
-        body = tk.Frame(self.body, bg=BG)
+    def _clear_view(self):
+        for w in self._holder.winfo_children():
+            w.destroy()
+        self._body_inner = None
+        self._form = None
+        self._sep = None
+
+    def _show_settings_view(self):
+        self._clear_view()
+        try:
+            self.title("设置")
+            self.geometry("560x430")
+        except tk.TclError:
+            pass
+        body = tk.Frame(self._holder, bg=BG)
+        body.pack(fill="both", expand=True, padx=18, pady=14)
+        self._body_inner = body
+        self._build_settings_ui(body)
+
+    def _show_add_view(self):
+        self._clear_view()
+        try:
+            self.title("添加 Key")
+            self.geometry("560x580")
+        except tk.TclError:
+            pass
+        body = tk.Frame(self._holder, bg=BG)
         body.pack(fill="both", expand=True, padx=18, pady=14)
         self._body_inner = body
 
+        back = tk.Label(body, text="← 返回设置", bg=BG, fg=FG,
+                        font=(FONT, 10, "underline"), cursor="hand2")
+        back.grid(row=0, column=0, sticky="w", pady=(0, 6))
+        back.bind("<Button-1>", lambda e: self._show_settings_view())
+
+        from ui.add_key import AddKeyForm
+        self._form = AddKeyForm(
+            body,
+            on_save=self._handle_entry_saved,
+            current_count=len(self._cfg.get("providers") or []),
+        )
+        self._form.grid(row=1, column=0, sticky="nsew")
+        body.rowconfigure(1, weight=1)
+        body.columnconfigure(0, weight=1)
+
+    def _handle_entry_saved(self, entry):
+        """表单保存 → 回调宿主写 cfg → 关闭对话框。"""
+        if self._on_add_key:
+            try:
+                self._on_add_key(entry)
+            except Exception:
+                pass
+        self._on_close_request()
+
+    def _build_settings_ui(self, body):
         # 主题 radio
-        self._theme_var = tk.StringVar(value=current_choice())
         theme_frame = tk.Frame(body, bg=BG)
         theme_frame.grid(row=0, column=0, columnspan=3, sticky="we", pady=(0, 10))
         tk.Label(theme_frame, text="主题", bg=BG, fg=FG,
@@ -171,24 +254,22 @@ class SettingsDialog(MacToplevel):
         theme_frame.columnconfigure(4, weight=1)
 
         # 3 个核心设置
-        self._vars = {}
         for i, (label, path, hint, lo, hi, vtype) in enumerate(ROWS):
             row_idx = i + 1
             tk.Label(body, text=label, bg=BG, fg=FG,
                      font=(FONT, 10)).grid(row=row_idx, column=0, sticky="w",
                                            pady=5, padx=(0, 8))
-            v = tk.StringVar()
+            v, _, _, _ = self._vars[path]
             e = tk.Entry(body, textvariable=v, width=14,
                          bg=BG_FIELD, fg=FG, insertbackground=FG,
                          font=(FONT, 10), relief="flat", justify="right")
             e.grid(row=row_idx, column=1, sticky="e", pady=5)
-            self._vars[path] = (v, vtype, lo, hi)
             tk.Label(body, text=hint, bg=BG, fg=DIM,
                      font=(FONT, 8)).grid(row=row_idx, column=2, sticky="w",
                                           pady=5, padx=(10, 0))
         body.columnconfigure(2, weight=1)
 
-        # 添加 Key 入口(指向独立 AddKeyDialog)
+        # 添加 Key 入口(原地切到添加视图,不开独立窗口)
         self._sep = tk.Frame(body, height=1, bg=DIM)
         self._sep.grid(row=len(ROWS) + 1, column=0, columnspan=3, sticky="ew",
                        pady=(12, 6))
@@ -196,14 +277,11 @@ class SettingsDialog(MacToplevel):
                         font=(FONT, 10, "underline"), cursor="hand2")
         link.grid(row=len(ROWS) + 2, column=0, columnspan=3, sticky="w",
                   pady=(2, 4))
-        link.bind("<Button-1>", self._open_add_key)
-        tk.Label(body, text="在独立窗口里填 Base URL / API Key / 默认模型",
-                 bg=BG, fg=DIM, font=(FONT, 8)).grid(
-            row=len(ROWS) + 3, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        link.bind("<Button-1>", lambda e: self._show_add_view())
 
         # 按钮行
         btn_frame = tk.Frame(body, bg=BG)
-        btn_frame.grid(row=len(ROWS) + 4, column=0, columnspan=3,
+        btn_frame.grid(row=len(ROWS) + 3, column=0, columnspan=3,
                        sticky="e", pady=(8, 0))
         tk.Button(btn_frame, text="取消", command=self.destroy,
                   bg=BTN_BG, fg=FG, relief="flat", font=(FONT, 10),
@@ -211,14 +289,6 @@ class SettingsDialog(MacToplevel):
         tk.Button(btn_frame, text="保存设置", command=self._save,
                   bg="#3a3a4a", fg=FG, relief="flat", font=(FONT, 10),
                   width=10).pack(side="right")
-
-    def _open_add_key(self, _event=None):
-        """点击链接 → 打开独立 AddKeyDialog。"""
-        if self._on_add_key:
-            try:
-                self._on_add_key()
-            except Exception:
-                pass
 
     def _on_theme_radio_click(self):
         """Radio 点击立即应用主题。"""

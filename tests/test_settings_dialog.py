@@ -53,8 +53,9 @@ class SettingsValidation(unittest.TestCase):
         """
         import inspect
         sig = inspect.signature(sd.SettingsDialog.__init__)
-        self.assertEqual(list(sig.parameters),
-                         ["self", "parent", "cfg", "on_save", "on_add_key"])
+        self.assertEqual(
+            list(sig.parameters),
+            ["self", "parent", "cfg", "on_save", "on_add_key", "initial_view"])
 
     def test_save_failed_validation_does_not_mutate_cfg(self):
         """校验失败时,合法项也不能写进 cfg(全量校验通过才写入)。"""
