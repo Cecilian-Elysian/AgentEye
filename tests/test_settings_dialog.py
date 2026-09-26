@@ -1,10 +1,17 @@
-"""测试 SettingsDialog 的设置读写 + 校验逻辑。"""
+"""测试 SettingsDialog 的设置读写 + 校验逻辑(简化版:仅 3 项设置)。"""
 import unittest
 from unittest import mock
 
 import tkinter as tk
 
 import ui.settings_dialog as sd
+
+
+ROWS_PATHS = [
+    "refresh_interval_sec",
+    "alert.critical_amount_yuan",
+    "alert.warn_pct",
+]
 
 
 class SettingsValidation(unittest.TestCase):
@@ -22,56 +29,57 @@ class SettingsValidation(unittest.TestCase):
         d._vars = {}
         d._cfg = {
             "refresh_interval_sec": 30,
-            "alert": {"warn_amount": 10, "warn_pct": 30, "max_per_hour": 60},
-            "aggregate": {"monthly_budget_usd": 100, "currency_rate_cny_per_usd": 7.2},
+            "alert": {"warn_pct": 30, "critical_amount_yuan": 5.0},
         }
+        d._theme_var = tk.StringVar(value="dark")
         for path, (lo, hi, vtype) in [
             ("refresh_interval_sec", (15, 3600, "int")),
-            ("alert.warn_amount", (0.0, 100000.0, "float")),
+            ("alert.critical_amount_yuan", (0.0, 100000.0, "float")),
             ("alert.warn_pct", (1, 99, "int")),
-            ("alert.max_per_hour", (0, 1440, "int")),
-            ("aggregate.monthly_budget_usd", (0.0, 100000.0, "float")),
-            ("aggregate.currency_rate_cny_per_usd", (0.1, 20.0, "float")),
         ]:
             d._vars[path] = (tk.StringVar(value="0"), vtype, lo, hi)
         return d
 
+    def test_only_three_settings(self):
+        """SettingsDialog 只保留 3 项设置(全部都在 ROWS 里)。"""
+        self.assertEqual(len(sd.ROWS), 3)
+        paths = [r[1] for r in sd.ROWS]
+        self.assertEqual(paths, ROWS_PATHS)
+
     def test_load_populates_vars(self):
         d = self._make_dialog()
-        sd.SettingsDialog._load(d, d._cfg)
+        sd.SettingsDialog._load(d)
         self.assertEqual(d._vars["refresh_interval_sec"][0].get(), "30")
-        self.assertEqual(d._vars["alert.warn_amount"][0].get(), "10")
+        self.assertEqual(d._vars["alert.critical_amount_yuan"][0].get(), "5")
         self.assertEqual(d._vars["alert.warn_pct"][0].get(), "30")
-        self.assertEqual(d._vars["alert.max_per_hour"][0].get(), "60")
-        self.assertEqual(d._vars["aggregate.monthly_budget_usd"][0].get(), "100")
-        self.assertEqual(d._vars["aggregate.currency_rate_cny_per_usd"][0].get(), "7.2")
+        # 浮点数 5.0 被 f"{v:g}" 格式化为 "5"
+        self.assertEqual(float(d._vars["alert.critical_amount_yuan"][0].get()), 5.0)
 
     def test_save_writes_to_cfg(self):
         d = self._make_dialog()
-        sd.SettingsDialog._load(d, d._cfg)
+        sd.SettingsDialog._load(d)
         d._vars["refresh_interval_sec"][0].set("60")
-        d._vars["alert.warn_amount"][0].set("20")
+        d._vars["alert.critical_amount_yuan"][0].set("10")
         d._vars["alert.warn_pct"][0].set("25")
-        d._vars["alert.max_per_hour"][0].set("30")
-        d._vars["aggregate.currency_rate_cny_per_usd"][0].set("7.5")
         with mock.patch.object(sd, "messagebox"):
             sd.SettingsDialog._save(d)
         self.assertEqual(d._cfg["refresh_interval_sec"], 60)
-        self.assertEqual(d._cfg["alert"]["warn_amount"], 20.0)
+        self.assertEqual(d._cfg["alert"]["critical_amount_yuan"], 10.0)
         self.assertEqual(d._cfg["alert"]["warn_pct"], 25)
-        self.assertEqual(d._cfg["alert"]["max_per_hour"], 30)
-        self.assertEqual(d._cfg["aggregate"]["currency_rate_cny_per_usd"], 7.5)
 
-    def test_load_default_when_max_per_hour_missing(self):
-        """cfg 里没有 max_per_hour 时,_load 退回 lo(0),不是 30。"""
+    def test_load_uses_defaults_when_missing(self):
+        """cfg 里没有对应 key 时,_load 走 DEFAULTS(不是 0)。"""
         d = self._make_dialog()
-        d._cfg["alert"].pop("max_per_hour")
-        sd.SettingsDialog._load(d, d._cfg)
-        self.assertEqual(d._vars["alert.max_per_hour"][0].get(), "0")
+        d._cfg = {"alert": {}}
+        sd.SettingsDialog._load(d)
+        self.assertEqual(d._vars["refresh_interval_sec"][0].get(), "30")
+        # 浮点数 5.0 经 f"{v:g}" 格式化为 "5"
+        self.assertEqual(d._vars["alert.critical_amount_yuan"][0].get(), "5")
+        self.assertEqual(d._vars["alert.warn_pct"][0].get(), "30")
 
     def test_save_rejects_out_of_range(self):
         d = self._make_dialog()
-        sd.SettingsDialog._load(d, d._cfg)
+        sd.SettingsDialog._load(d)
         d._vars["refresh_interval_sec"][0].set("5")  # < 15
         with mock.patch.object(sd, "messagebox") as mb:
             sd.SettingsDialog._save(d)
@@ -80,8 +88,8 @@ class SettingsValidation(unittest.TestCase):
 
     def test_save_rejects_non_numeric(self):
         d = self._make_dialog()
-        sd.SettingsDialog._load(d, d._cfg)
-        d._vars["alert.warn_amount"][0].set("not a number")
+        sd.SettingsDialog._load(d)
+        d._vars["alert.critical_amount_yuan"][0].set("not a number")
         with mock.patch.object(sd, "messagebox") as mb:
             sd.SettingsDialog._save(d)
         mb.showerror.assert_called()

@@ -180,13 +180,8 @@ class TestSettingsDialogMacMode(unittest.TestCase):
         from ui.settings_dialog import SettingsDialog
         cfg = {"ui": {"theme": "dark"},
                "refresh_interval_sec": 60,
-               "alert": {"warn_amount": 5.0, "warn_amount_yuan": 30.0,
-                         "critical_amount": 2.0, "critical_amount_yuan": 10.0,
-                         "warn_pct": 30, "critical_pct": 15,
-                         "cooldown_min": 30, "max_per_hour": 5},
-               "aggregate": {"monthly_budget_usd": 100.0,
-                             "currency_rate_cny_per_usd": 7.2}}
-        dlg = SettingsDialog(self.root, cfg, current_count=0)
+               "alert": {"warn_pct": 30, "critical_amount_yuan": 10.0}}
+        dlg = SettingsDialog(self.root, cfg)
         try:
             self.assertTrue(hasattr(dlg, "body"))
             self.assertTrue(hasattr(dlg, "header"))
@@ -200,13 +195,8 @@ class TestSettingsDialogMacMode(unittest.TestCase):
         from ui.settings_dialog import SettingsDialog
         cfg = {"ui": {"theme": "dark"},
                "refresh_interval_sec": 60,
-               "alert": {"warn_amount": 5.0, "warn_amount_yuan": 30.0,
-                         "critical_amount": 2.0, "critical_amount_yuan": 10.0,
-                         "warn_pct": 30, "critical_pct": 15,
-                         "cooldown_min": 30, "max_per_hour": 5},
-               "aggregate": {"monthly_budget_usd": 100.0,
-                             "currency_rate_cny_per_usd": 7.2}}
-        dlg = SettingsDialog(self.root, cfg, current_count=0)
+               "alert": {"warn_pct": 30, "critical_amount_yuan": 10.0}}
+        dlg = SettingsDialog(self.root, cfg)
         try:
             dlg.refresh_palette()
             self.assertTrue(True)

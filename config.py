@@ -62,11 +62,7 @@ TEMPLATE = {
     "alert": {
         "enable": True,
         "warn_pct": 30,
-        "critical_pct": 10,
-        "warn_amount": 10,
-        "critical_amount": 3,
-        "cooldown_min": 60,
-        "max_per_hour": 60,
+        "critical_amount_yuan": 5.0,
     },
     "ui": {"x": None, "y": None},
     "relay_sites": [
@@ -84,8 +80,6 @@ TEMPLATE = {
         {
             "name": "DeepSeek",
             "api_key": "在这里粘贴DeepSeek的key",
-            "warn_amount": 10,
-            "critical_amount": 5,
         }
     ],
     "zhipu": [{"name": "智谱 GLM", "api_key": "在这里粘贴智谱的key"}],
@@ -160,16 +154,7 @@ V2_TEMPLATE = {
     "alert": {
         "enable": True,
         "warn_pct": 30,
-        "critical_pct": 10,
-        "warn_amount": 10,
-        "critical_amount": 3,
-        "cooldown_min": 60,
-        "max_per_hour": 60,
-    },
-    "aggregate": {
-        "enabled": True,
-        "monthly_budget_usd": 100.0,
-        "currency_rate_cny_per_usd": 7.2,
+        "critical_amount_yuan": 5.0,
     },
     "ui": {"x": None, "y": None, "width": 360, "height": 360, "order": [], "pinned": True, "mode": "standard", "theme": "auto"},
     "providers": [],
@@ -194,8 +179,7 @@ DEFAULT_BASE_URLS = {
 
 V1_ENTRY_KEY_FIELDS = {"api_key", "token", "key"}
 V1_LIFTED_FIELDS = {"name", "base_url"}
-V1_PROVIDER_KEEP_FIELDS = {"warn_amount", "critical_amount", "warn_pct",
-                           "critical_pct", "quota_per_usd",
+V1_PROVIDER_KEEP_FIELDS = {"quota_per_usd",
                            "new_api_user_id", "headers"}
 
 

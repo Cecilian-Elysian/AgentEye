@@ -24,7 +24,7 @@ def _make_v1_minimal():
         "relay_sites": [],
         "minimax": [{"name": "我的 MiniMax", "api_key": "sk-cp-real-key-12345"}],
         "opencode_go": [{"api_key": "eyJ-real-jwt-key"}],
-        "deepseek": [{"name": "DS", "api_key": "sk-ds-real", "warn_amount": 50}],
+        "deepseek": [{"name": "DS", "api_key": "sk-ds-real"}],
         "zhipu": [{"api_key": "zhipu-key"}],
     }
 
@@ -50,7 +50,7 @@ class TestMigrateV1ToV2(unittest.TestCase):
     def test_deepseek_passthrough(self):
         v2 = migrate_v1_to_v2(_make_v1_minimal())
         d = next(p for p in v2["providers"] if p["kind"] == "deepseek")
-        self.assertEqual(d.get("warn_amount"), 50)
+        self.assertEqual(d["name"], "DS")
 
     def test_opencode_default_url(self):
         v2 = migrate_v1_to_v2(_make_v1_minimal())
@@ -88,11 +88,11 @@ class TestMigrateV1ToV2(unittest.TestCase):
         self.assertEqual(v2["ui"], {"x": 100, "y": 200})
         self.assertEqual(v2["alert"]["warn_amount"], 20)
 
-    def test_aggregate_defaults_present(self):
+    def test_alert_defaults_present(self):
         v2 = migrate_v1_to_v2(_make_v1_minimal())
-        self.assertIn("aggregate", v2)
-        self.assertTrue(v2["aggregate"]["enabled"])
-        self.assertEqual(v2["aggregate"]["monthly_budget_usd"], 100.0)
+        self.assertIn("alert", v2)
+        self.assertEqual(v2["alert"]["warn_pct"], 30)
+        self.assertEqual(v2["alert"]["critical_amount_yuan"], 5.0)
 
     def test_empty_v1(self):
         v2 = migrate_v1_to_v2({})

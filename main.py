@@ -31,7 +31,6 @@ class Poller(threading.Thread):
         self.stop = stop_event
         self.wake = wake_event
         self.notified = {}
-        self._last_global_alert_ts = cache_mod.load_alert_state()
 
     def run(self):
         while not self.stop.is_set():
@@ -64,8 +63,8 @@ class Poller(threading.Thread):
         alert_cfg = self.cfg.get("alert") or {}
         if not alert_cfg.get("enable", True):
             return
-        cooldown = float(alert_cfg.get("cooldown_min", 60)) * 60
-        max_per_hour = float(alert_cfg.get("max_per_hour", 60)) * 60
+        # 简化版:硬编码 60min per-provider cooldown;无全局节流。
+        COOLDOWN_SEC = 60 * 60
         now = time.time()
         items = []
         for r in results:
@@ -74,13 +73,12 @@ class Poller(threading.Thread):
                 continue
             key = r["name"]
             last = self.notified.get(key)
-            if last and last[0] == level and now - last[1] < cooldown:
+            if last and last[0] == level and now - last[1] < COOLDOWN_SEC:
                 continue
             self.notified[key] = (level, now)
             verb = "额度告急" if level == "critical" else "额度偏低"
             items.append((r["name"], verb))
-        if items and max_per_hour > 0 and now - self._last_global_alert_ts >= max_per_hour:
-            self._last_global_alert_ts = now
+        if items:
             try:
                 cache_mod.save_alert_state(now)
             except Exception:

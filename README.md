@@ -12,8 +12,7 @@
 - **金额/额度双视图**:金额行(`$ ¥ 额度`)无进度条 + 💰 前缀 + 暖色底;百分比行带渐变进度条
 - **今日已用 / 总额**:中转站显示 `今日 $X.XX / $Y.YY`,百分比行继续显示 `5h% · 周% · 倒计时`
 - **消耗渐变色**:绿→黄→红三色插值,基于 `used_today/total` 计算消耗比,主值与 detail 中所有 `$X` / `¥X` / `X%` 同步上色
-- **全局告警节流**:新增 `alert.max_per_hour`(默认 60 min),跨 provider / 跨等级合并,1 小时最多弹一次 toast,杜绝反复弹 / 多 provider 各自弹
-- **告警时间戳持久化**:全局告警时间戳落到 `~/.agenteye/cache/alert_state.json`,重启后 1h 闸门不归零,频繁重启也不会刷屏;`max_per_hour=0` 等同关闭告警
+- **per-provider 告警冷却**:同一 provider 同等级告警 60 分钟内不重复弹;等级切换(warn → critical)算新告警
 
 ### 窗口与交互
 
@@ -33,7 +32,7 @@
 
 ### 配置与管理
 
-- **设置界面**:Header `≡` 打开,改刷新间隔、告警/临界阈值(双币种独立)、**全局告警间隔**、月度预算、汇率;同页含添加 Key 表单(5 预设 + 自动探测 + 连续添加)
+- **设置界面**:Header `≡` 打开,改刷新间隔、¥ 临界阈值、% 告警阈值 + 主题切换;链接 "添加 API Key" 跳转独立 AddKeyDialog(5 预设 + 自动探测 + 连续添加)
 - **删除确认**:右键删除 provider 需输入名字确认,同时清理 models 缓存并追加 probe 日志标记
 - **首启欢迎 toast**:首次启动给出操作提示
 - **v1 自动迁移**:旧的 5 个分立数组配置自动升级为统一 `providers[]`,备份为 `config.json.v1.bak`
@@ -63,16 +62,7 @@ python main.py   前台运行便于看报错
   "alert": {
     "enable": true,
     "warn_pct": 30,
-    "critical_pct": 10,
-    "warn_amount": 10,
-    "critical_amount": 3,
-    "cooldown_min": 60,
-    "max_per_hour": 60
-  },
-  "aggregate": {
-    "enabled": true,
-    "monthly_budget_usd": 100.0,
-    "currency_rate_cny_per_usd": 7.2
+    "critical_amount_yuan": 5.0
   },
   "ui": {"x": null, "y": null, "width": 360, "height": 360, "order": [], "pinned": true},
   "providers": [
@@ -89,13 +79,15 @@ python main.py   前台运行便于看报错
 环境变量覆盖: `MINIMAX_API_KEY` / `OPENCODE_GO_API_KEY` / `DEEPSEEK_API_KEY`,
 或在条目里写 `"api_key_env": "自定义环境变量名"`。
 
-`alert.max_per_hour` 说明:
+告警级别判定:
 
-| 值 | 行为 |
+| 单位 | 触发条件 |
 |---|---|
-| `0` | 等同关闭所有 toast 告警(per-provider `cooldown_min` 也失效) |
-| `> 0` | 任意 provider / 任意等级变化,合并为一条 toast,每 N 分钟最多一次 |
-| 默认 `60` | 1 小时最多一条 |
+| `¥` | 剩余金额 ≤ `alert.critical_amount_yuan`(默认 5)→ 红 |
+| `%` | 剩余百分比 ≤ `alert.warn_pct`(默认 30)→ 黄 |
+| `$` / 其他 | 不做阈值判断,一直 `ok` |
+
+per-provider 60 min 硬编码冷却:同一 provider 同等级不重复弹,跨等级 / 跨 provider 不合并。
 
 ## 支持的 provider
 
@@ -116,7 +108,7 @@ python main.py   前台运行便于看报错
 - **光标**:拖动时 `fleur`,行 hover `hand2`,× 按钮 hover 变红
 - **点击数值**:无移动 → 复制到剪贴板;有移动 → 拖拽重排
 - **右键行**:刷新此行 / 查看模型 / 试调 / 编辑 / 暂停 / 复制 key / 复制 URL / 删除(删除需输入名字确认)
-- **点击 ≡ 按钮**:打开设置界面(刷新间隔 / 告警阈值 / **全局告警间隔** / 月度预算 / 汇率 / 同页添加 Key)
+- **点击 ≡ 按钮**:打开设置界面(刷新间隔 / ¥ 临界阈值 / % 告警阈值 / 主题)
 - **点击 ⊙ / ○ 按钮**:切换窗口固定(topmost)
 - **点击 – 按钮**:最小化到任务栏,点击任务栏图标还原
 - **右键菜单**:立即刷新 / 通知测试 / 添加 Key / 暂停 / 打开配置 / 退出
@@ -146,7 +138,7 @@ python main.py   前台运行便于看报错
 | `~/.agenteye/config.json.v1.bak` | v1 → v2 迁移时自动备份 |
 | `~/.agenteye/cache/models.json` | 模型列表缓存(TTL 6 h,按 base_url + key hash) |
 | `~/.agenteye/cache/probe.jsonl` | 试调日志(append-only) |
-| `~/.agenteye/cache/alert_state.json` | 全局告警时间戳(1h 闸门持久化) |
+| `~/.agenteye/cache/alert_state.json` | 告警时间戳(per-provider 冷却持久化) |
 
 ## 测试
 
@@ -154,11 +146,11 @@ python main.py   前台运行便于看报错
 python -m unittest discover tests
 ```
 
-当前 **162 个测试用例** 覆盖:
+当前 **266 个测试用例** 覆盖:
 
-- `detect` / `generic` / `cache`(含 provider 删除清理)/ `migration` / `aggregate` / `panel` 渐变 / 金额行模式 / 拖拽重排
+- `detect` / `generic` / `cache`(含 provider 删除清理)/ `migration` / `panel` 渐变 / 金额行模式 / 拖拽重排
 - 设置校验 / AddKey placeholder / 滚动条结构 / 删除确认 / 模型面板分组与重排回调 / 重建后重绘回归
-- **告警全局节流** (`test_fire_alerts.py`):跨 provider 合并、跨等级升级被拦、窗口期内不弹、过窗口再弹、`max_per_hour=0` 等效关闭、`cooldown_min=0` 不绕过全局闸门
+- **告警 per-provider 冷却** (`test_fire_alerts.py`):基本弹发、禁用不弹、ok 忽略、同 provider 同 level 60min 冷却、warn→critical 算新告警、多 provider 各弹
 - **首帧进度条** (`test_panel_bar.py`):不调 `update_idletasks` 时 Tk `<Configure>` 仍正确驱动 rect、resize 后 handler 用 `event.width` 重画
 
 ## 已知边界
@@ -174,11 +166,10 @@ python -m unittest discover tests
 main.py             入口,Poller 线程 + tk mainloop
 config.py           v1 + v2 schema,load_v2 自动迁移,原子写
 cache.py            models_cache (TTL, 含 order) + probe_log (JSONL)
-                    + alert_state (全局告警时间戳)
-notify.py           alert_many 合并 + 跨 provider 全局节流
+                    + alert_state (per-provider 冷却时间戳)
+notify.py           alert_many 合并 toast
 providers/
-  __init__.py       注册表,collect_entries / fetch_all / _level
-  aggregate.py      USD 归一化 + 聚合 level
+  __init__.py       注册表,collect_entries / fetch_all / _level(¥ 临界 + % 警告)
   detect.py         key 前缀 + URL 提示识别 kind
   generic.py        OpenAI 兼容探测 + 4 种 quota parser
   relay.py / minimax.py / opencode_go.py / deepseek.py / zhipu.py   5 内置 provider
@@ -188,12 +179,22 @@ ui/
   row_menu.py       行右键菜单(删除走输入名字确认)
   confirm_delete.py 危险操作确认:输入名字才能确认
   model_panel.py    模型列表 + 拖拽重排 + 搜索 + 分组 + 试调 + 价格计算
-  add_key.py        Add Key 对话框:5 预设 + placeholder + 预览
-  settings_dialog.py   设置界面:刷新/告警/全局间隔/预算/汇率
+  add_key.py        Add Key 对话框:5 预设 + placeholder + 预览(独立窗口)
+  settings_dialog.py   设置界面:刷新间隔 / ¥ 临界 / % 警告 / 主题(链接添加 Key)
   presets.py        内置 provider 预设占位(待设置对话框接线)
 ```
 
 ## 更新日志
+
+### v2.2 (设置界面简化)
+
+- `refactor(ui)`:SettingsDialog 砍到 3 项设置(刷新间隔 / ¥ 临界 / % 警告)+ 主题切换;"添加 API Key" 拆成链接跳转独立 AddKeyDialog
+- `refactor(alert)`:删除 `warn_amount` / `warn_amount_yuan` / `critical_amount` / `critical_pct` / `cooldown_min` / `max_per_hour` 6 项 cfg key;_level 简化到 ¥ 临界 + % 警告
+- `refactor(aggregate)`:删除 `monthly_budget_usd` / `currency_rate_cny_per_usd` 2 项 cfg key + 整模块 `providers/aggregate.py`(只被测试引用)
+- `refactor(alert)`:全局节流 → per-provider 60min 冷却(硬编码)
+- `fix(ui)`:SettingsDialog 去掉 grab_set() 改为非模态,允许设置打开时主面板仍可拖动
+- `fix(ui)`:去掉交通灯 hover glyph(× − ⋯),只保留 cursor=hand2 表示可点击
+- `fix(ui)`:交通灯右移到右集群,黄绿红顺序;⚙ 简化为绿点设键;浅色交通灯残留深色框修复
 
 ### v2.1 (最近 4 笔 commit)
 

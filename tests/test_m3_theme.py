@@ -347,8 +347,7 @@ class TestSettingsDialogThemeRadio(unittest.TestCase):
     def test_dialog_has_theme_var(self):
         from ui.settings_dialog import SettingsDialog
         cfg = {"ui": {}}
-        dlg = SettingsDialog(self.root, cfg, on_save=lambda c: None,
-                              current_count=0)
+        dlg = SettingsDialog(self.root, cfg, on_save=lambda c: None)
         try:
             self.assertTrue(hasattr(dlg, "_theme_var"))
             self.assertIn(dlg._theme_var.get(), ("dark", "light", "auto"))
@@ -362,8 +361,7 @@ class TestSettingsDialogThemeRadio(unittest.TestCase):
     def test_dialog_loads_saved_theme(self):
         from ui.settings_dialog import SettingsDialog
         cfg = {"ui": {"theme": "light"}}
-        dlg = SettingsDialog(self.root, cfg, on_save=lambda c: None,
-                              current_count=0)
+        dlg = SettingsDialog(self.root, cfg, on_save=lambda c: None)
         try:
             self.assertEqual(dlg._theme_var.get(), "light")
         finally:
@@ -382,24 +380,19 @@ class TestSettingsDialogThemeRadio(unittest.TestCase):
                 "ui": {"theme": "dark"},
                 "refresh_interval_sec": 60,
                 "alert": {
-                    "warn_amount": 5.0, "warn_amount_yuan": 30.0,
-                    "critical_amount": 2.0, "critical_amount_yuan": 10.0,
-                    "warn_pct": 30, "critical_pct": 15,
-                    "cooldown_min": 30, "max_per_hour": 5,
-                },
-                "aggregate": {
-                    "monthly_budget_usd": 100.0,
-                    "currency_rate_cny_per_usd": 7.2,
+                    "warn_pct": 30,
+                    "critical_amount_yuan": 10.0,
                 },
             }
             captured = {}
             dlg = SettingsDialog(self.root, cfg,
-                                  on_save=lambda c: captured.update(dict(c)),
-                                  current_count=0)
+                                  on_save=lambda c: captured.update(dict(c)))
             try:
                 dlg._theme_var.set("light")
                 dlg._save()
                 self.assertEqual(captured.get("ui", {}).get("theme"), "light")
+                self.assertEqual(captured.get("refresh_interval_sec"), 60)
+                self.assertEqual(captured.get("alert", {}).get("warn_pct"), 30)
             finally:
                 try:
                     if dlg.winfo_exists():

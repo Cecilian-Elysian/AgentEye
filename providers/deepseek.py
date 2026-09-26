@@ -4,7 +4,6 @@ TIMEOUT = 12
 URL = "https://api.deepseek.com/user/balance"
 
 SYMBOLS = {"CNY": "¥", "USD": "$"}
-DEFAULT_THRESHOLDS = {"CNY": (10.0, 5.0), "USD": (2.0, 1.0)}
 
 
 def fetch(entry):
@@ -51,12 +50,6 @@ def fetch(entry):
     if not available:
         detail += " · 余额不可用"
 
-    warn, crit = DEFAULT_THRESHOLDS.get(currency, (10.0, 5.0))
-    if entry.get("warn_amount") is not None:
-        warn = float(entry["warn_amount"])
-    if entry.get("critical_amount") is not None:
-        crit = float(entry["critical_amount"])
-
     return {
         "remaining": total,
         "used": None,
@@ -65,6 +58,4 @@ def fetch(entry):
         "pct": None,
         "detail": detail,
         "is_estimate": False,
-        "warn": warn,
-        "critical": crit,
     }

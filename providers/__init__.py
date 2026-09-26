@@ -52,8 +52,7 @@ def _to_legacy_entry(p):
     }
     extra = p.get("extra") or {}
     entry.update(extra)
-    for f in ("warn_amount", "critical_amount", "warn_pct", "critical_pct",
-              "quota_per_usd", "new_api_user_id", "headers"):
+    for f in ("quota_per_usd", "new_api_user_id", "headers"):
         if f in p:
             entry[f] = p[f]
     return entry
@@ -101,34 +100,28 @@ def _one(kind, entry, cfg):
 
 
 def _level(res, entry, cfg):
+    """阈值简化版:只有 ¥ 临界和 % 警告会触发 warn/critical,其余保持 OK。
+
+    - ¥ 临界:cfg.alert.critical_amount_yuan(默认 5.0),低于 = critical
+    - % 警告:cfg.alert.warn_pct(默认 30),低于 = warn
+    - $ / 额度 / 其他:不再做阈值判断,保持 ok
+    """
     if res.get("error"):
         return "unconfigured" if res.get("unconfigured") else "error"
     alert = cfg.get("alert") or {}
     unit = res.get("unit")
-    if unit in AMOUNT_UNITS or unit == "额度" or entry.get("warn_amount") is not None:
-        if unit == "¥":
-            d_warn, d_crit = 10.0, 5.0
-        else:
-            d_warn, d_crit = 10.0, 3.0
-        warn = float(entry.get("warn_amount", alert.get("warn_amount", d_warn)))
-        crit = float(entry.get("critical_amount", alert.get("critical_amount", d_crit)))
+    if unit == "¥":
+        crit = float(alert.get("critical_amount_yuan", 5.0))
         remaining = res.get("remaining")
         if remaining is None:
             return "ok"
-        if remaining <= crit:
-            return "critical"
-        if remaining <= warn:
-            return "warn"
-        return "ok"
-    warn = float(entry.get("warn_pct", alert.get("warn_pct", 30)))
-    crit = float(entry.get("critical_pct", alert.get("critical_pct", 10)))
-    pct = res.get("pct")
-    if pct is None:
-        return "ok"
-    if pct <= crit:
-        return "critical"
-    if pct <= warn:
-        return "warn"
+        return "critical" if remaining <= crit else "ok"
+    if unit == "%":
+        warn = float(alert.get("warn_pct", 30))
+        pct = res.get("pct")
+        if pct is None:
+            return "ok"
+        return "warn" if pct <= warn else "ok"
     return "ok"
 
 
