@@ -24,6 +24,12 @@ USED_KEYS = ("used_quota", "used", "usage_count", "consumed", "total_used", "usa
 TOTAL_KEYS = ("total", "limit", "total_quota", "monthly_limit", "max")
 
 
+def _cache_key(base, email):
+    # 同一站点可以挂多个账号;只按 base 缓存会让两个账号共用同一 token,
+    # 第二个账号拿到的是第一个账号的额度。
+    return (base, email)
+
+
 def fetch(entry):
     base = (entry.get("base_url") or "").rstrip("/")
     token = entry.get("token") or ""
@@ -59,7 +65,7 @@ def fetch(entry):
                 errors.append(f"{path}: {e.__class__.__name__}")
                 continue
             if r.status_code == 401 and use_access_token and not relogged:
-                _TOKEN_CACHE.pop(base, None)
+                _TOKEN_CACHE.pop(_cache_key(base, email), None)
                 relogged = True
                 break
             if r.status_code != 200:
@@ -83,7 +89,7 @@ def fetch(entry):
 
 
 def _get_access_token(base, email, password):
-    cached = _TOKEN_CACHE.get(base)
+    cached = _TOKEN_CACHE.get(_cache_key(base, email))
     if cached and cached["expiry"] > time.time():
         return cached["token"], None
     try:
@@ -107,7 +113,7 @@ def _get_access_token(base, email, password):
         ttl = float(data.get("expires_in") or 3600)
     except (TypeError, ValueError):
         ttl = 3600.0
-    _TOKEN_CACHE[base] = {
+    _TOKEN_CACHE[_cache_key(base, email)] = {
         "token": token,
         "expiry": time.time() + max(60.0, ttl - 60.0),
     }

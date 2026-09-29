@@ -60,18 +60,30 @@ def send_toast(title, message):
         return False
     ps = PS_TEMPLATE.format(title=_ps_escape(title), message=_ps_escape(message))
     try:
-        subprocess.Popen(
+        proc = subprocess.Popen(
             [PS_EXE, "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
             creationflags=CREATE_NO_WINDOW,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        def _release():
-            time.sleep(5)
-            _decrement_proc()
-        threading.Thread(target=_release, daemon=True).start()
-        return True
     except Exception:
         _decrement_proc()
         return False
+
+    def _watch():
+        """等子进程退出:非 0 说明 WinRT/模板失败,回退 beep。
+
+        不在调用线程里等,alert() 保持即时返回。
+        """
+        try:
+            rc = proc.wait(timeout=15)
+        except Exception:
+            rc = 1
+        finally:
+            _decrement_proc()
+        if rc != 0:
+            beep()
+    threading.Thread(target=_watch, daemon=True).start()
+    return True
 
 
 def beep():

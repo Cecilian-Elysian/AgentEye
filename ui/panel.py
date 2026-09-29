@@ -328,25 +328,46 @@ class Panel:
             root, text="", font=(FONT, 8), fg=C["dim"], bg=C["bg"], anchor="w")
         self.footer.pack(fill="x", padx=10, pady=(2, 8))
 
-        for w in (root,):
-            w.bind("<Button-1>", self._drag_start)
-            w.bind("<B1-Motion>", self._drag_move)
-            w.bind("<ButtonRelease-1>", self._drag_end)
-            w.bind("<FocusIn>", lambda e: actions["refresh_now"]())
+        # 键盘/焦点类绑定必须挂到 Toplevel。挂在 slot(Frame)上时,
+        # 行内 Text 一旦吃掉焦点,Frame 的 bindtag 链不含子控件,
+        # F5 / Ctrl+Q / Esc 会全线失效。
+        toplevel = self.root_window or root
+        toplevel.bind("<FocusIn>", self._on_focus_in, add="+")
+        toplevel.bind("<F5>", lambda e: actions["refresh_now"](), add="+")
+        toplevel.bind("<Control-q>", lambda e: actions["quit"](), add="+")
+        toplevel.bind("<Escape>", lambda e: self._close_any_popup(), add="+")
+        # 拖动窗口只绑在 toplevel 上:mac 模式下 MacHeader 已经在拖,
+        # 面板 body 不再抢,否则两套拖拽逻辑打架。
+        if not is_frame:
+            for w in (root,):
+                w.bind("<Button-1>", self._drag_start, add="+")
+                w.bind("<B1-Motion>", self._drag_move, add="+")
+                w.bind("<ButtonRelease-1>", self._drag_end, add="+")
 
         self.menu = self._build_menu()
-        root.bind("<Button-3>", self._popup_main_menu)
-        root.bind("<Map>", self._on_map)
-        root.bind("<F5>", lambda e: actions["refresh_now"]())
-        root.bind("<Control-q>", lambda e: actions["quit"]())
-        root.bind("<Escape>", lambda e: self._close_any_popup())
+        root.bind("<Button-3>", self._popup_main_menu, add="+")
+        root.bind("<Map>", self._on_map, add="+")
 
         self._tick()
         self._maybe_welcome()
         self._build_resize_grip()
-        self.root.bind("<Configure>", self._on_root_configure)
+        self.root.bind("<Configure>", self._on_root_configure, add="+")
 
         on_theme_change(self.refresh_palette)
+        # 构造期 C 可能是深色快照(Panel 晚于 apply_theme 创建),
+        # 这里主动刷一次,让首帧就用当前主题的色。
+        self.refresh_palette()
+
+    def _on_focus_in(self, event=None):
+        """窗口级重新激活时刷新一次。
+
+        绝不能绑在行内的 Text/Entry 上:Tk 的 FocusIn 会沿父链冒泡,
+        那样点任意一行都会触发一次全量轮询。
+        """
+        state = getattr(self, "state", None)
+        if state is not None and getattr(state, "fetching", False):
+            return
+        self.actions["refresh_now"]()
 
     def _place_initial(self):
         ui = self.cfg.get("ui") or {}
@@ -379,6 +400,9 @@ class Panel:
         return None
 
     def _skip_build_resize_grip(self):
+        # mac 模式下 grip 由 MacWindow 接管。必须显式置 None,否则
+        # _is_window_drag_target 读 self._resize_grip 会 AttributeError。
+        self._resize_grip = None
         return None
 
     def _build_header(self):
@@ -478,8 +502,9 @@ class Panel:
         - Header 按钮(tk.Button): 交给自身 command
         """
         w = widget
+        grip = getattr(self, "_resize_grip", None)
         while w is not None:
-            if w is self._resize_grip or getattr(w, "_provider_name", None):
+            if w is grip or getattr(w, "_provider_name", None):
                 return False
             if w.winfo_class() == "Button":
                 return False
@@ -821,6 +846,7 @@ class Panel:
 
         levels = [r.get("level") for r in results]
         poll_error = getattr(self.state, "poll_error", None)
+        save_error = getattr(self.state, "save_error", None)
         dot = getattr(self, "dot", None)
         if dot is not None:
             if poll_error:
@@ -838,8 +864,13 @@ class Panel:
 
         footer = getattr(self, "footer", None)
         if footer is not None:
+            fg = C["dim"]
             if poll_error:
                 text = f"轮询出错:{poll_error}"
+                fg = C["error"]
+            elif save_error:
+                text = f"配置未保存:{save_error}"
+                fg = C["error"]
             elif self.state.paused:
                 text = "已暂停轮询"
             elif self.state.fetching:
@@ -848,7 +879,7 @@ class Panel:
                 text = f"下次刷新 {_fmt_countdown(self.state.next_fetch - time.time())}"
             else:
                 text = "等待首次刷新…"
-            footer.config(text=text, fg=C["error"] if poll_error else C["dim"])
+            footer.config(text=text, fg=fg)
 
     def _rebuild(self, results):
         for child in self.rows_frame.winfo_children():

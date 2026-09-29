@@ -112,6 +112,13 @@ def fetch(entry):
     if not models_result.get("error"):
         parsed["models"] = [m["id"] for m in models_result["models"]]
         parsed["models_count"] = len(parsed["models"])
+        # 同步进模型缓存:probe_models / ModelPanel 只认缓存,
+        # 不落库的话每次都要现场拉 /v1/models。
+        try:
+            import cache
+            cache.set_models(base_url, key, parsed["models"])
+        except Exception:
+            pass
 
     parsed.setdefault("detail", "")
     parsed["detail"] = f"[{parsed['quota_endpoint']}] {parsed['detail']}".strip()
@@ -124,7 +131,9 @@ def _parse_openai_billing(body):
         return None
     try:
         granted = float(body.get("total_granted") or body.get("granted_amount") or 0)
-        used = float(body.get("total_used_amount") or 0)
+        # one-api 系的 billing 端点字段是 total_used;个别站点会包装成
+        # total_used_amount,两个都接受。
+        used = float(body.get("total_used") or body.get("total_used_amount") or 0)
         available = float(body.get("total_available") or 0)
     except (TypeError, ValueError):
         return None

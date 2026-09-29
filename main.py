@@ -22,6 +22,7 @@ class State:
         self.paused_providers = set()
         self.fetching = False
         self.poll_error = None
+        self.save_error = None
 
 
 class Poller(threading.Thread):
@@ -162,8 +163,8 @@ def build_actions(root, cfg, state, stop, wake):
         def _on_save(new_cfg):
             cfg.clear()
             cfg.update(new_cfg)
-            config_mod.save_v2(cfg)
-            _apply_settings_live()
+            if _save():
+                _apply_settings_live()
 
         _settings_win["dlg"] = SettingsDialog(
             root, cfg, on_save=_on_save,
@@ -176,34 +177,55 @@ def build_actions(root, cfg, state, stop, wake):
         """设置保存后即时生效:立即唤醒 poller,新配置下次 fetch 生效。"""
         wake.set()
 
+    def _save():
+        """统一的配置落盘出口。
+
+        save_v2 现在会抛 ConfigError(明文 key 拒写 / 文件被占用 / 版本过高),
+        绝不能让调用方以为"界面已变所以一定存下来了"。失败时弹一次 toast,
+        并把最近一次错误放进 state 供 footer 展示。
+        """
+        try:
+            config_mod.save_v2(cfg)
+            state.save_error = None
+            return True
+        except config_mod.ConfigError as e:
+            state.save_error = str(e)
+            try:
+                notify.alert("AgentEye", f"配置未保存:{e}")
+            except Exception:
+                pass
+            return False
+
     def save_position(x, y):
         ui = cfg.setdefault("ui", {})
         ui["x"], ui["y"] = int(x), int(y)
-        config_mod.save_v2(cfg)
+        _save()
 
     def save_size(w, h):
         ui = cfg.setdefault("ui", {})
         ui["width"], ui["height"] = int(w), int(h)
-        config_mod.save_v2(cfg)
+        _save()
 
     def save_order(order):
         ui = cfg.setdefault("ui", {})
         ui["order"] = list(order)
-        config_mod.save_v2(cfg)
+        _save()
 
     def save_pin(pinned):
         ui = cfg.setdefault("ui", {})
         ui["pinned"] = bool(pinned)
-        config_mod.save_v2(cfg)
+        _save()
 
-    def save_ui():
-        config_mod.save_v2(cfg)
+    def save_ui(new_cfg=None):
+        # MacWindow._persist_mode 会带一个 cfg 快照进来;真正的 cfg 已被
+        # 它就地改过(同一个对象),所以这里只落盘,不合并。
+        _save()
 
     def save_theme(theme):
         ui = cfg.setdefault("ui", {})
         if theme in ("dark", "light", "auto"):
             ui["theme"] = theme
-            config_mod.save_v2(cfg)
+            _save()
 
     def get_order():
         return list((cfg.get("ui") or {}).get("order") or [])
@@ -240,7 +262,7 @@ def build_actions(root, cfg, state, stop, wake):
             "extra": {},
         }
         cfg.setdefault("providers", []).append(new_provider)
-        config_mod.save_v2(cfg)
+        _save()
         try:
             import notify as notify_mod
             notify_mod.alert("AgentEye", f"已添加:{new_provider['name']}")
@@ -256,7 +278,7 @@ def build_actions(root, cfg, state, stop, wake):
                     or p.get("name") or "未命名"
                 p["key"] = entry.get("key") or ""
                 p["base_url"] = entry.get("base_url") or ""
-                config_mod.save_v2(cfg)
+                _save()
                 wake.set()
                 return
 
@@ -269,7 +291,7 @@ def build_actions(root, cfg, state, stop, wake):
         key = config_mod.plain_key(target)
         name = target.get("name") or pid
         cfg["providers"] = [p for p in providers if p.get("id") != pid]
-        config_mod.save_v2(cfg)
+        _save()
         try:
             import cache as cache_mod
             if base_url and key:
