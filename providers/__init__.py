@@ -169,35 +169,3 @@ def _level(res, entry, cfg):
             return "ok"
         return "warn" if pct <= warn else "ok"
     return "ok"
-
-
-def fmt_main(res):
-    if res.get("paused"):
-        return "已暂停"
-    if res.get("unconfigured"):
-        return "未配置"
-    if res.get("error"):
-        return "查询失败"
-    unit = res.get("unit", "")
-    prefix = "≈" if res.get("is_estimate") else ""
-    if unit in AMOUNT_UNITS:
-        remaining = res.get("remaining")
-        if remaining is None:
-            return "-"
-        text = f"{prefix}{unit}{remaining:,.2f}"
-        if res.get("total"):
-            text += f" / {unit}{res['total']:,.2f}"
-        return text
-    if unit == "%":
-        pct = res.get("pct")
-        return f"{pct:.0f}%" if pct is not None else "-"
-    remaining = res.get("remaining")
-    return f"{prefix}{remaining:,.2f}{unit}" if remaining is not None else "-"
-
-
-def fmt_countdown(sec):
-    sec = max(0, int(sec))
-    h, m, s = sec // 3600, (sec % 3600) // 60, sec % 60
-    if h:
-        return f"{h}h{m:02d}m{s:02d}s"
-    return f"{m:02d}:{s:02d}"

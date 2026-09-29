@@ -97,15 +97,44 @@ class TestFetchAllSkip(unittest.TestCase):
 
 
 class TestFmtPaused(unittest.TestCase):
-    def test_fmt_main_paused(self):
-        self.assertEqual(providers.fmt_main({"paused": True}), "已暂停")
+    """暂停行在真正使用的格式化函数里要显示"已暂停",不是 "-"。
 
-    def test_fmt_main_paused_beats_error(self):
-        self.assertEqual(
-            providers.fmt_main({"paused": True, "error": "boom"}), "已暂停")
+    历史上 providers.fmt_main 是个没人调用的死函数,断言都打在它身上;
+    真正跑的是 ui.panel._fmt_main 与 ui.essential_bar._main_value。
+    """
 
-    def test_fmt_main_normal_unaffected(self):
-        self.assertEqual(providers.fmt_main({"unit": "%", "pct": 42}), "42%")
+    def test_dead_formatters_are_gone(self):
+        for name in ("fmt_main", "fmt_countdown"):
+            self.assertFalse(hasattr(providers, name),
+                             f"providers.{name} 是死函数,应已删除")
+
+    def test_panel_fmt_main_paused(self):
+        from ui.panel import _fmt_main
+        self.assertEqual(_fmt_main({"paused": True}), "已暂停")
+
+    def test_panel_fmt_main_paused_beats_error(self):
+        from ui.panel import _fmt_main
+        self.assertEqual(_fmt_main({"paused": True, "error": "boom"}),
+                         "已暂停")
+
+    def test_panel_fmt_main_normal_unaffected(self):
+        from ui.panel import _fmt_main
+        self.assertEqual(_fmt_main({"unit": "%", "pct": 42}), "42%")
+        self.assertEqual(_fmt_main({"unconfigured": True}), "未配置")
+        self.assertEqual(_fmt_main({"error": "boom"}), "查询失败")
+
+    def test_essential_bar_main_value_paused(self):
+        from ui.essential_bar import _main_value
+        self.assertEqual(_main_value({"paused": True}), ("已暂停", ""))
+
+    def test_essential_bar_main_value_none_unchanged(self):
+        from ui.essential_bar import _main_value
+        self.assertEqual(_main_value(None), ("—", "—"))
+
+    def test_paused_row_without_branch_would_render_dash(self):
+        """反证:没有 paused 分支时结果确实是 "-",说明断言有效。"""
+        from ui.panel import _fmt_main
+        self.assertEqual(_fmt_main({"unit": "", "remaining": None}), "-")
 
 
 class TestThemePausedLevel(unittest.TestCase):

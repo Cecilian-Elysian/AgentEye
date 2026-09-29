@@ -94,6 +94,8 @@ def _main_value(row):
     """主值文案:金额行 → '¥X / ¥Y' 或 '今日 ¥X / ¥Y';百分比行 → 'X%'。"""
     if row is None:
         return "—", "—"
+    if row.get("paused"):
+        return "已暂停", ""
     unit = row.get("unit") or ""
     prefix = "≈" if row.get("is_estimate") else ""
     if unit in ("$", "¥"):

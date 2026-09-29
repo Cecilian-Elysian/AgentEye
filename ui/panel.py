@@ -95,6 +95,8 @@ def _sync_to_tk():
 
 
 def _fmt_main(result):
+    if result.get("paused"):
+        return "已暂停"
     if result.get("unconfigured"):
         return "未配置"
     if result.get("error"):
