@@ -130,19 +130,40 @@ class SettingsDialog(MacToplevel):
         # transient() 保证窗口始终浮在主窗口之上。
         self.focus_set()
 
-        edit_pid = None
-        if (isinstance(initial_view, (tuple, list)) and len(initial_view) == 2
-                and initial_view[0] == "edit"):
-            edit_pid = initial_view[1]
+        self.goto(initial_view)
 
-        if initial_view == VIEW_ADD_KEY:
+    # ---------- 公共 ----------
+
+    def goto(self, view=None):
+        """切到指定视图。宿主重复打开设置时复用同一个窗口,靠它换视图。
+
+        view: None → 列表;"add_key" → 空白表单;("edit", pid) → 预填表单。
+        目标不存在时退回列表,不抛异常。
+        """
+        if not self.winfo_exists():
+            return
+        edit_pid = None
+        if (isinstance(view, (tuple, list)) and len(view) == 2
+                and view[0] == "edit"):
+            edit_pid = view[1]
+
+        if view == VIEW_ADD_KEY:
             self._swap_center_form(None)
         elif edit_pid is not None and self._find_provider(edit_pid):
             self._swap_center_form(edit_pid)
         else:
             self._swap_center_list()
 
-    # ---------- 公共 ----------
+    def raise_(self):
+        """已打开时置顶并聚焦,让用户看得到刚点的按钮生效了。"""
+        if not self.winfo_exists():
+            return
+        try:
+            self.deiconify()
+            self.lift()
+            self.focus_force()
+        except tk.TclError:
+            pass
 
     def _init_vars(self):
         """主题 var + 3 个设置项的 StringVar,独立于视图构建,供 _load 使用。"""

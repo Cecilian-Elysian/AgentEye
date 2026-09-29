@@ -141,8 +141,23 @@ def build_actions(root, cfg, state, stop, wake):
         except Exception:
             pass
 
+    _settings_win = {"dlg": None}
+
     def open_settings(view=None):
+        """打开设置窗口。已打开则复用同一实例并切到目标视图,不再叠窗口。"""
         from ui.settings_dialog import SettingsDialog
+
+        dlg = _settings_win.get("dlg")
+        if dlg is not None:
+            try:
+                alive = bool(dlg.winfo_exists())
+            except Exception:
+                alive = False
+            if alive:
+                dlg.goto(view)
+                dlg.raise_()
+                return
+            _settings_win["dlg"] = None
 
         def _on_save(new_cfg):
             cfg.clear()
@@ -150,11 +165,12 @@ def build_actions(root, cfg, state, stop, wake):
             config_mod.save_v2(cfg)
             _apply_settings_live()
 
-        SettingsDialog(root, cfg, on_save=_on_save,
-                       on_add_key=add_key_entry,
-                       on_update_provider=update_provider,
-                       on_delete_provider=delete_provider_by_id,
-                       initial_view=view)
+        _settings_win["dlg"] = SettingsDialog(
+            root, cfg, on_save=_on_save,
+            on_add_key=add_key_entry,
+            on_update_provider=update_provider,
+            on_delete_provider=delete_provider_by_id,
+            initial_view=view)
 
     def _apply_settings_live():
         """设置保存后即时生效:立即唤醒 poller,新配置下次 fetch 生效。"""

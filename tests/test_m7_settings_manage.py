@@ -457,6 +457,120 @@ class _no_messagebox:
         return False
 
 
+class TestSettingsWindowIsSingleton(unittest.TestCase):
+    """设置窗口单例:重复点击复用同一实例,不叠出一串对话框。
+
+    背景:open_settings 此前每次都 new 一个 SettingsDialog,连点绿点或
+    反复用右键「设置…」会叠出一串各自为政的窗口(一个在列表一个在表单),
+    编辑会互相覆盖 cfg。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        set_theme("dark", broadcast=False, persist=False)
+        cls.root = tk.Tk()
+        cls.root.withdraw()
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.root.destroy()
+        except tk.TclError:
+            pass
+
+    @staticmethod
+    def _destroy(w):
+        try:
+            w.destroy()
+        except tk.TclError:
+            pass
+
+    def _actions(self, cfg):
+        import threading
+        import main as main_mod
+        state = main_mod.State()
+        return main_mod.build_actions(self.root, cfg, state,
+                                      threading.Event(), threading.Event())
+
+    def _cfg(self):
+        return {"providers": [
+            {"id": "p1", "name": "DeepSeek", "kind": "deepseek",
+             "key": "k1", "base_url": "https://api.deepseek.com"},
+        ]}
+
+    def _open(self, actions, view=None):
+        from ui.settings_dialog import SettingsDialog
+        actions["open_settings"](view)
+        dialogs = [w for w in self.root.winfo_children()
+                   if isinstance(w, SettingsDialog) and w.winfo_exists()]
+        self.assertEqual(len(dialogs), 1, f"应只有 1 个设置窗口,实得 {len(dialogs)}")
+        self.addCleanup(self._destroy, dialogs[0])
+        return dialogs[0]
+
+    def test_second_open_reuses_same_window(self):
+        actions = self._actions(self._cfg())
+        first = self._open(actions)
+        second = self._open(actions)
+        self.assertIs(first, second)
+
+    def test_reopen_navigates_to_add_view(self):
+        actions = self._actions(self._cfg())
+        dlg = self._open(actions)
+        self.assertIsNone(dlg._form)
+        self._open(actions, "add_key")
+        self.assertIsNotNone(dlg._form, "应切到添加表单")
+        self.assertIsNone(dlg._editing_id)
+
+    def test_reopen_navigates_to_edit_view(self):
+        actions = self._actions(self._cfg())
+        dlg = self._open(actions)
+        self._open(actions, ("edit", "p1"))
+        self.assertEqual(dlg._editing_id, "p1")
+        self.assertIsNotNone(dlg._form)
+
+    def test_reopen_back_to_list(self):
+        actions = self._actions(self._cfg())
+        dlg = self._open(actions, "add_key")
+        self._open(actions)
+        self.assertIsNone(dlg._form)
+        self.assertIsNone(dlg._editing_id)
+
+    def test_recreated_after_destroy(self):
+        """窗口被关掉后引用要失效,下次点击要能重新开。"""
+        actions = self._actions(self._cfg())
+        first = self._open(actions)
+        self._destroy(first)
+        self.root.update_idletasks()
+        second = self._open(actions)
+        self.assertIsNot(first, second)
+        self.assertTrue(second.winfo_exists())
+
+    def test_unknown_edit_target_falls_back_to_list(self):
+        actions = self._actions(self._cfg())
+        dlg = self._open(actions)
+        self._open(actions, ("edit", "不存在"))
+        self.assertIsNone(dlg._form)
+
+    def test_main_holds_a_single_slot(self):
+        """源码断言:宿主必须持有一个可复用的引用。"""
+        src = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
+        self.assertIn('_settings_win = {"dlg": None}', src)
+        self.assertIn("dlg.goto(view)", src)
+        self.assertIn("dlg.raise_()", src)
+
+    def test_dialog_exposes_goto_and_raise(self):
+        from ui.settings_dialog import SettingsDialog
+        self.assertTrue(callable(getattr(SettingsDialog, "goto", None)))
+        self.assertTrue(callable(getattr(SettingsDialog, "raise_", None)))
+
+    def test_goto_on_destroyed_dialog_is_noop(self):
+        actions = self._actions(self._cfg())
+        dlg = self._open(actions)
+        self._destroy(dlg)
+        dlg.goto("add_key")  # 不应抛异常
+        dlg.raise_()
+
+
 class TestMainWiring(unittest.TestCase):
     """main.py 接线源码断言(仿 TestM45Integration 模式)。"""
 
