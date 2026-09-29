@@ -36,13 +36,16 @@ class TestLightThemeReadability(unittest.TestCase):
         cfg = config_mod.load_v2()
         return MacWindow(self.root, cfg, actions or {})
 
-    def test_text_tk_module_globals_refresh_on_set_theme(self):
-        """TEXT_TK / TEXT_DIM_TK 模块常量必须在 set_theme 之后立即更新。"""
+    def test_palette_accessors_track_set_theme(self):
+        """to_tk_color(PALETTE.TEXT) 必须在 set_theme 之后立即变化。"""
         import ui.theme as t
-        t.set_theme("dark", broadcast=False)
-        self.assertEqual(t.TEXT_TK, "#FFFFFF")
-        t.set_theme("light", broadcast=False)
-        self.assertEqual(t.TEXT_TK, "#000000")
+        try:
+            t.set_theme("dark", broadcast=False)
+            self.assertEqual(t.to_tk_color(t.PALETTE.TEXT), "#FFFFFF")
+            t.set_theme("light", broadcast=False)
+            self.assertEqual(t.to_tk_color(t.PALETTE.TEXT), "#000000")
+        finally:
+            t.set_theme("dark", broadcast=False, persist=False)
 
     def test_to_tk_color_blended_dim_has_visible_contrast(self):
         """to_tk_color_blended 把 alpha 预混合到 BG 上,产出 6 位色仍

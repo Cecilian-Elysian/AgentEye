@@ -25,7 +25,7 @@ from ui.theme import (
     DarkPalette, LightPalette, PALETTES, PALETTE, Layout,
     set_theme, current_palette, current_choice, is_dark,
     on_theme_change, off_theme_change, detect_system_theme,
-    THEME_CHOICES, TEXT_TK, TEXT_DIM_TK, LEVEL_COLOR,
+    THEME_CHOICES, LEVEL_COLOR,
     hex_with_alpha, to_tk_color, blend, usage_color,
 )
 
@@ -231,14 +231,57 @@ class TestColorHelpers(unittest.TestCase):
         self.assertEqual(usage_color(None).lower(), PALETTE.UNKNOWN.lower())
 
 
-class TestThemeConstantsPrebuilt(unittest.TestCase):
+class TestThemeAccessorsAreNotFrozen(unittest.TestCase):
+    """颜色必须走 to_tk_color(PALETTE.X) 实时取,不得有冻结的模块常量。
 
-    def test_text_tk_is_6_digit(self):
-        self.assertIsInstance(TEXT_TK, str)
-        self.assertEqual(len(TEXT_TK.lstrip("#")), 6)
+    历史上 theme.py 导出过 TEXT_TK / TEXT_DIM_TK 等在 import 时求值的
+    常量,浅色主题下会残留深色值(commit 411bffb),现已删除。
+    """
 
-    def test_text_dim_tk_is_6_digit(self):
-        self.assertEqual(len(TEXT_DIM_TK.lstrip("#")), 6)
+    def test_frozen_constants_are_gone(self):
+        import ui.theme as t
+        for name in ("TEXT_TK", "TEXT_DIM_TK", "TEXT_DISABLED_TK",
+                     "DIVIDER_TK", "current_text", "current_text_dim",
+                     "current_text_disabled", "current_divider"):
+            self.assertFalse(hasattr(t, name),
+                             f"theme.{name} 是冻结常量,应已删除")
+            self.assertNotIn(name, t.__all__)
+
+    def test_no_module_uses_the_frozen_constants(self):
+        import glob
+        import os
+        offenders = []
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for rel in sorted(glob.glob(os.path.join(root, "*.py"))
+                          + glob.glob(os.path.join(root, "ui", "*.py"))
+                          + glob.glob(os.path.join(root, "providers", "*.py"))):
+            with open(rel, encoding="utf-8") as fh:
+                for i, line in enumerate(fh, 1):
+                    for bad in ("TEXT_TK", "TEXT_DIM_TK", "TEXT_DISABLED_TK",
+                                "DIVIDER_TK"):
+                        if bad in line and "ui/theme.py" not in rel:
+                            offenders.append(f"{rel}:{i}")
+        self.assertEqual(offenders, [])
+
+    def test_to_tk_color_tracks_theme(self):
+        """同一个调色板字段在两套主题下应给出不同的 Tk 色值。"""
+        from ui.theme import PALETTE, to_tk_color
+        try:
+            set_theme("dark", broadcast=False, persist=False)
+            dark = to_tk_color(PALETTE.TEXT)
+            set_theme("light", broadcast=False, persist=False)
+            light = to_tk_color(PALETTE.TEXT)
+        finally:
+            set_theme("dark", broadcast=False, persist=False)
+        self.assertNotEqual(dark, light)
+
+    def test_to_tk_color_is_6_digit(self):
+        self.assertEqual(len(to_tk_color(PALETTE.TEXT).lstrip("#")), 6)
+
+    def test_to_tk_color_blended_is_6_digit(self):
+        from ui.theme import to_tk_color_blended
+        self.assertEqual(
+            len(to_tk_color_blended(PALETTE.TEXT_DIM).lstrip("#")), 6)
 
     def test_theme_choices(self):
         self.assertIn("dark", THEME_CHOICES)

@@ -184,8 +184,7 @@ def set_theme(name, broadcast=True, persist=True):
 
     返回实际生效的 palette key (dark/light),即使 name 是 auto 也会解析。
     """
-    global _current_choice, _active_palette, TEXT_TK, TEXT_DIM_TK
-    global TEXT_DISABLED_TK, DIVIDER_TK
+    global _current_choice, _active_palette
     if name not in THEME_CHOICES:
         name = "dark"
     resolved = _resolve(name)
@@ -194,10 +193,6 @@ def set_theme(name, broadcast=True, persist=True):
     _current_choice = name
     _active_palette = PALETTES[resolved]
     _refresh_level_color()
-    TEXT_TK = current_text()
-    TEXT_DIM_TK = current_text_dim()
-    TEXT_DISABLED_TK = current_text_disabled()
-    DIVIDER_TK = current_divider()
     if broadcast:
         for cb in list(_listeners):
             try:
@@ -356,31 +351,6 @@ def to_tk_color_blended(hex_with_alpha_or_6, bg_hex=None):
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-def current_text():
-    """当前主题下的纯文字色(无 alpha)。"""
-    return to_tk_color(PALETTE.TEXT)
-
-
-def current_text_dim():
-    """当前主题下的"次要文字"色:把 TEXT_DIM 的 alpha 预混合到 BG 上。"""
-    return to_tk_color_blended(PALETTE.TEXT_DIM)
-
-
-def current_text_disabled():
-    """当前主题下的"禁用文字"色。"""
-    return to_tk_color_blended(PALETTE.TEXT_DISABLED)
-
-
-def current_divider():
-    return to_tk_color_blended(PALETTE.DIVIDER)
-
-
-TEXT_TK = current_text()
-TEXT_DIM_TK = current_text_dim()
-TEXT_DISABLED_TK = current_text_disabled()
-DIVIDER_TK = current_divider()
-
-
 def blend(top_hex, bottom_hex, t):
     """颜色插值:t=0 取 top,t=1 取 bottom。返回 #RRGGBB。"""
     def _to_rgb(h):
@@ -414,9 +384,8 @@ __all__ = [
     "LEVEL_OK", "LEVEL_WARN", "LEVEL_CRITICAL", "LEVEL_ERROR",
     "LEVEL_UNCONFIGURED", "LEVEL_PAUSED", "LEVEL_UNKNOWN",
     "hex_with_alpha", "to_tk_color", "to_tk_color_blended",
-    "current_text", "current_text_dim", "current_text_disabled",
-    "current_divider", "blend", "usage_color",
+    "blend", "usage_color",
     "set_theme", "current_palette", "current_choice", "is_dark",
     "on_theme_change", "off_theme_change", "detect_system_theme",
-    "THEME_CHOICES", "TEXT_TK", "TEXT_DIM_TK", "TEXT_DISABLED_TK", "DIVIDER_TK",
+    "THEME_CHOICES",
 ]
