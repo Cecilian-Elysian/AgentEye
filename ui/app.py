@@ -16,7 +16,7 @@
 
 import tkinter as tk
 
-from ui.theme import PALETTE, Layout, set_theme, current_choice, on_theme_change, to_tk_color
+from ui.theme import PALETTE, Layout, set_theme, current_choice, bind_theme_listener, to_tk_color
 from ui.fonts import fonts
 from ui.vibrancy import apply_window_chrome
 
@@ -187,7 +187,7 @@ class MacWindow:
         self._drag_active = False
         self._bind_global_drag()
 
-        on_theme_change(self._on_theme_change)
+        bind_theme_listener(self.root, self._on_theme_change)
 
     def _on_theme_change(self, choice, palette, persist):
         """主题切换回调:重画 root/header/body/slots + 所有交通灯 + view.refresh_palette。"""

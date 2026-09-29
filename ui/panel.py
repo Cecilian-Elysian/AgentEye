@@ -12,7 +12,7 @@ import time
 import tkinter as tk
 
 import config as config_mod
-from ui.theme import PALETTE, set_theme, on_theme_change, to_tk_color, to_tk_color_blended
+from ui.theme import PALETTE, set_theme, bind_theme_listener, to_tk_color, to_tk_color_blended
 from ui.scrollbar_style import make_dark_scrollbar
 
 FONT = "Microsoft YaHei UI"
@@ -353,7 +353,7 @@ class Panel:
         self._build_resize_grip()
         self.root.bind("<Configure>", self._on_root_configure, add="+")
 
-        on_theme_change(self.refresh_palette)
+        bind_theme_listener(toplevel, self.refresh_palette)
         # 构造期 C 可能是深色快照(Panel 晚于 apply_theme 创建),
         # 这里主动刷一次,让首帧就用当前主题的色。
         self.refresh_palette()
@@ -1048,9 +1048,17 @@ class Panel:
         def _on_reorder(new_order):
             if save_model_order:
                 save_model_order(name, base_url, key, new_order)
-        ModelPanel(self.root, name, models, on_probe=_probe_cb,
-                   on_reorder=_on_reorder,
-                   on_after_reorder=lambda: self.actions["refresh_now"]())
+        # 单例:先收掉上一个,否则每点一次"模型列表"就叠一层 Toplevel
+        prev = getattr(self, "_model_panel", None)
+        if prev is not None:
+            try:
+                if prev.winfo_exists():
+                    prev.destroy()
+            except tk.TclError:
+                pass
+        self._model_panel = ModelPanel(self.root, name, models, on_probe=_probe_cb,
+                                       on_reorder=_on_reorder,
+                                       on_after_reorder=lambda: self.actions["refresh_now"]())
 
     def _paint_row(self, widgets, r):
         ratio_val = _usage_ratio(r)

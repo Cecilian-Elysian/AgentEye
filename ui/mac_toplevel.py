@@ -21,7 +21,7 @@
 
 import tkinter as tk
 
-from ui.theme import PALETTE, Layout, on_theme_change, to_tk_color
+from ui.theme import PALETTE, Layout, bind_theme_listener, to_tk_color
 from ui.vibrancy import apply_window_chrome
 
 
@@ -78,7 +78,7 @@ class MacToplevel(tk.Toplevel):
         self._apply_chrome()
         self._center_on_parent(parent, width, height)
 
-        on_theme_change(self._on_theme_change)
+        bind_theme_listener(self, self._on_theme_change)
 
     def _build_header(self):
         """左侧交通灯 + 中间标题。"""

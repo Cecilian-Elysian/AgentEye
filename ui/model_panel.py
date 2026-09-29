@@ -370,17 +370,20 @@ class ModelPanel(MacToplevel):
             ok, latency_ms, error = self.on_probe(model)
         except Exception as e:
             ok, latency_ms, error = False, 0, str(e)
-        self.after(0, self._probe_done, model, ok, latency_ms, error)
+        try:
+            self.after(0, self._probe_done, model, ok, latency_ms, error)
+        except tk.TclError:
+            # 窗口在试调期间被关掉:结果没处展示,静默放弃
+            pass
 
     def _probe_done(self, model, ok, latency_ms, error):
-        msg = f"{'✓' if ok else '✗'} {latency_ms:.0f}ms" if ok else f"{'✗'} {error}"
+        mark = "✓" if ok else "✗"
+        msg = f"{mark} {latency_ms:.0f}ms" if ok else f"✗ {error}"
         var = (getattr(self, "probe_result_vars", None) or {}).get(model)
         if var is not None:
             var.set(msg)
             self.after(3000, lambda: self._clear_probe_result(var)
                        if var.get() == msg else None)
-        print(f"{'✓' if ok else '✗'} {model}  {latency_ms:.0f}ms" if ok
-              else f"{'✗'} {model}  {error}")
 
     def _clear_probe_result(self, var):
         try:

@@ -214,6 +214,26 @@ def off_theme_change(callback):
         pass
 
 
+def bind_theme_listener(widget, callback):
+    """注册主题监听,并保证 widget 销毁时自动反注册。
+
+    之前各窗口/对话框直接 on_theme_change,关闭后监听器残留在
+    _listeners 里:每次切主题都去刷一堆已销毁的控件(靠 except 吞
+    TclError),对象也被闭包拽住无法回收。对话框每开一次就漏一个。
+    """
+    on_theme_change(callback)
+
+    def _on_destroy(event):
+        if event.widget is widget:
+            off_theme_change(callback)
+
+    try:
+        widget.bind("<Destroy>", _on_destroy, add="+")
+    except Exception:
+        pass
+    return lambda: off_theme_change(callback)
+
+
 class _PaletteProxy:
     """模块级 PALETTE 是这个类的实例,__getattr__ 代理到当前 active palette。
 

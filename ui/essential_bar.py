@@ -14,7 +14,7 @@
 import time
 import tkinter as tk
 
-from ui.theme import PALETTE, Layout, usage_color, on_theme_change, to_tk_color, to_tk_color_blended
+from ui.theme import PALETTE, Layout, usage_color, bind_theme_listener, to_tk_color, to_tk_color_blended
 from ui.fonts import fonts
 
 
@@ -222,7 +222,7 @@ class EssentialBar:
                   bar_holder, self.bar_canvas, self.countdown_lbl):
             w.bind("<Button-1>", self._on_click, add="+")
 
-        on_theme_change(self.refresh_palette)
+        bind_theme_listener(self.frame, self.refresh_palette)
         self._tick()
 
     def _on_chevron_click(self, _event=None):

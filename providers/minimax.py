@@ -98,13 +98,15 @@ def fetch(entry):
     except ValueError:
         return {"error": "响应非 JSON"}
 
-    items = _extract_items(body)
-    if not items:
-        return {"error": "响应结构未识别"}
-
+    # 接口级报错必须在解析 items 之前判:不然错误体里的残留字段会被
+    # 当成正常数据,报出莫名的"结构未识别"或假额度。
     status_code = (body.get("base_resp") or {}).get("status_code")
     if status_code not in (None, 0):
         return {"error": f"接口报错: {(body.get('base_resp') or {}).get('status_msg', status_code)}"}
+
+    items = _extract_items(body)
+    if not items:
+        return {"error": "响应结构未识别"}
 
     parsed = []
     skipped = 0
@@ -135,6 +137,12 @@ def fetch(entry):
     headline = next(
         (p for p in parsed if "general" in str(p["name"]).lower()), parsed[0]
     )
+    if headline["interval"] is None:
+        # general 项没有 5h 百分比时,退而取第一个有百分比的项,
+        # 避免 headline 指向空值导致 reset 时间和实际 pct 张冠李戴。
+        with_pct = next((p for p in parsed if p["interval"] is not None), None)
+        if with_pct is not None:
+            headline = with_pct
     pct = headline["interval"]
     if pct is None:
         percents = [p["interval"] for p in parsed if p["interval"] is not None]

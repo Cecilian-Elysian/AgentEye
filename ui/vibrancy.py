@@ -151,9 +151,10 @@ def apply_window_chrome(root, dark=True):
     if sys.platform == "win32":
         try:
             root.update_idletasks()
-            hwnd = int(root.wm_frame(), 16) if False else root.winfo_id()
+            # DWA 圆角/背板/标题栏都要打在顶层 HWND 上:wm_frame 给的是
+            # WM 包装窗口,才是任务栏里那个窗口;winfo_id 只是客户区。
             try:
-                hwnd = int(root.frame(), 16)
+                hwnd = int(root.wm_frame(), 16)
             except Exception:
                 hwnd = root.winfo_id()
             if is_windows_11_or_later():

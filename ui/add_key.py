@@ -25,7 +25,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 from providers import detect as detect_mod
-from ui.theme import PALETTE, on_theme_change, to_tk_color, to_tk_color_blended
+from ui.theme import PALETTE, bind_theme_listener, to_tk_color, to_tk_color_blended
 
 
 PRESETS = [
@@ -60,7 +60,7 @@ class AddKeyForm(tk.Frame):
         self._taken_names = frozenset(taken_names or ())
 
         self._build_ui(current_count)
-        on_theme_change(self.refresh_palette)
+        bind_theme_listener(self, self.refresh_palette)
 
     # ---------- 配色 ----------
 
