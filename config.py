@@ -8,7 +8,11 @@ CONFIG_PATH = Path.home() / ".agenteye" / "config.json"
 
 
 def _encrypt_providers(providers):
-    """把 providers 列表里每个 key 升级为 key_enc(若 secure 可用)。"""
+    """就地加密:把 providers 里的明文 key 升级为 key_enc(移除 key)。
+
+    仅在**副本**上调用(见 _prepare_for_disk),绝不改写调用方的 cfg。
+    secure 不可用或 protect 失败时原样保留明文,静默降级。
+    """
     try:
         import secure
     except Exception:
@@ -28,11 +32,34 @@ def _encrypt_providers(providers):
         if not enc:
             continue
         p["key_enc"] = enc
-        # 保留明文 key 以兼容不支持 DPAPI 的运行环境;目标环境才删除
-        # 为避免明文落盘,迁移后删除 key 字段
         p.pop("key", None)
         changed = True
     return changed
+
+
+def _decrypt_providers(providers):
+    """就地解密:key_enc → 明文 key,并清掉 key_enc。
+
+    只在**内存态** cfg 上调用(见 load_v2),使运行期永远拿到明文。
+    解密失败回退保留原 key_enc,调用方 plain_key 仍能再试。
+    """
+    changed = False
+    for p in providers or []:
+        if not isinstance(p, dict) or not p.get("key_enc"):
+            continue
+        plain = plain_key(p)
+        if plain:
+            p["key"] = plain
+            p.pop("key_enc", None)
+            changed = True
+    return changed
+
+
+def _prepare_for_disk(cfg):
+    """深拷贝 cfg 并加密其中的 key,得到可直接写盘的形态。"""
+    data = copy.deepcopy(cfg)
+    _encrypt_providers(data.get("providers") or [])
+    return data
 
 
 def plain_key(provider):
@@ -242,11 +269,12 @@ def atomic_save(path, data):
 
 
 def save_v2(cfg):
-    """保存 v2 schema 配置(原子写)。"""
+    """保存 v2 schema 配置(原子写)。
+
+    只在**深拷贝**上做 DPAPI 加密,调用方手里的 cfg 始终保持明文内存态。
+    """
     try:
-        # 写盘前把明文 key 加密(若可用);失败则原样保存,不阻塞配置
-        _encrypt_providers(cfg.get("providers") or [])
-        atomic_save(CONFIG_PATH, cfg)
+        atomic_save(CONFIG_PATH, _prepare_for_disk(cfg))
     except OSError:
         pass
 
@@ -298,13 +326,8 @@ def load_v2():
     if user_cfg.get("schema_version") == 2:
         merged = merge_v2_defaults(copy.deepcopy(V2_TEMPLATE), user_cfg)
         apply_env_v2(merged)
-        # 加密升级:首次加载时把 plaintext key 转成 key_enc 并落盘
-        providers = merged.get("providers") or []
-        if _encrypt_providers(providers):
-            try:
-                save_v2(merged)
-            except OSError:
-                pass
+        # 内存态归一:key_enc 解成明文 key,调用方一律读 p["key"]
+        _decrypt_providers(merged.get("providers") or [])
         return merged
 
     backup = CONFIG_PATH.with_suffix(".v1.bak")
@@ -314,12 +337,6 @@ def load_v2():
     except OSError:
         pass
     migrated = migrate_v1_to_v2(user_cfg)
-    providers = migrated.get("providers") or []
-    if _encrypt_providers(providers):
-        try:
-            save_v2(migrated)
-        except OSError:
-            pass
-    else:
-        save_v2(migrated)
+    _decrypt_providers(migrated.get("providers") or [])
+    save_v2(migrated)
     return migrated

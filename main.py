@@ -229,7 +229,7 @@ def build_actions(root, cfg, state, stop, wake):
         if not target:
             return
         base_url = target.get("base_url") or ""
-        key = target.get("key") or ""
+        key = config_mod.plain_key(target)
         name = target.get("name") or pid
         cfg["providers"] = [p for p in providers if p.get("id") != pid]
         config_mod.save_v2(cfg)

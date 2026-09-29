@@ -41,13 +41,25 @@ def fetch_all(cfg):
         return [f.result() for f in futures]
 
 
-def _to_legacy_entry(p):
-    """v2 entry → legacy 适配器期望的 dict 形状。"""
+def _resolve_key(entry):
+    """取明文 key:优先内存态 key,否则解 key_enc(磁盘态兜底)。"""
+    key = entry.get("key") or ""
+    if key or not entry.get("key_enc"):
+        return key
+    try:
+        from config import plain_key
+        return plain_key(entry) or ""
+    except Exception:
+        return ""
+
+
+def _to_legacy_entry(p, key):
+    """v2 entry → legacy 适配器期望的 dict 形状。key 由调用方解好。"""
     entry = {
         "name": p.get("name"),
-        "api_key": p.get("key"),
-        "token": p.get("key"),
-        "key": p.get("key"),
+        "api_key": key,
+        "token": key,
+        "key": key,
         "base_url": p.get("base_url"),
     }
     extra = p.get("extra") or {}
@@ -77,14 +89,14 @@ def _one(kind, entry, cfg):
         "unconfigured": False,
         "level": "unknown",
     }
-    key = entry.get("key") or ""
+    key = _resolve_key(entry)
     login_creds = bool((entry.get("extra") or {}).get("email")
                        and (entry.get("extra") or {}).get("password"))
     if (not key and not login_creds) or key in PLACEHOLDER_KEYS:
         result.update({"error": "未配置 key", "unconfigured": True,
                        "level": "unconfigured"})
         return result
-    legacy = _to_legacy_entry(entry)
+    legacy = _to_legacy_entry(entry, key)
     adapter = ADAPTERS.get(kind)
     if not adapter:
         result["error"] = f"未知 provider kind: {kind}"
