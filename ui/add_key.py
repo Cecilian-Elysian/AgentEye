@@ -1,14 +1,19 @@
 """Add Key 表单(可内嵌,非独立窗口)。
 
 粘贴 key → 自动探测 → 预览 → 保存。宿主决定容器:
-- ui/settings_dialog.py 在同一窗口内切换「设置 ↔ 添加 Key」两个视图
+- ui/settings_dialog.py 在设置视图的中间区切换「列表 ↔ 表单」两种模式
 - 面板工具栏的"添加"入口也走设置对话框,不再弹独立窗口
+
+两种形态:
+- 添加(initial=None):空白表单,显示预设按钮
+- 编辑(initial={name,key,base_url}):预填表单,隐藏预设,key 已填时
+  直接允许保存,不强制先探测
 
 流程:
   0. 顶部一行 5 个 provider 预设按钮 (MiniMax/DeepSeek/智谱/OpenCode/中转站),
-     点击自动填默认 base_url 和名称占位
+     点击自动填默认 base_url 和名称占位(编辑模式隐藏)
   1. 用户输入 base_url (可选) 和 api_key
-  2. FocusOut 触发 detect + 通用探测(超时 8s)
+  2. FocusOut 触发 detect + 通用探测(超时 8s);预填不触发
   3. 预览区显示识别结果 + 模型数 + 余额快照
   4. 用户填名称,点"保存"
   5. 回调 on_save(entry),随后 on_done()(宿主决定去向)
@@ -37,7 +42,8 @@ class AddKeyForm(tk.Frame):
     PROBE_TIMEOUT = 8.0
 
     def __init__(self, parent, on_save=None, on_done=None, generic_probe=None,
-                 current_count=0, show_count=True):
+                 current_count=0, show_count=True, initial=None,
+                 show_presets=True):
         super().__init__(parent, bg=to_tk_color(PALETTE.BG))
         self.on_save = on_save
         self.on_done = on_done
@@ -46,6 +52,8 @@ class AddKeyForm(tk.Frame):
         self._probe_result = None
         self._probe_started_at = 0.0
         self._show_count = show_count
+        self._initial = initial if isinstance(initial, dict) else None
+        self._show_presets = show_presets
 
         self._build_ui(current_count)
         on_theme_change(self.refresh_palette)
@@ -118,18 +126,19 @@ class AddKeyForm(tk.Frame):
         tk.Label(top_row, text=count_text, bg=BG, fg=DIM,
                  font=(FONT, 9)).pack(side="right")
 
-        tk.Label(self, text="快速选择", bg=BG, fg=DIM,
-                 font=(FONT, 10)).pack(anchor="w", padx=4, pady=(2, 4))
-        preset_frame = tk.Frame(self, bg=BG)
-        preset_frame.pack(anchor="w", padx=4)
-        for label, kind, url in PRESETS:
-            b = tk.Label(preset_frame, text=label, font=(FONT, 9),
-                         bg=BTN_BG, fg=FG, padx=10, pady=4, cursor="hand2")
-            b.pack(side="left", padx=(0, 6))
-            b.bind("<Button-1>",
-                   lambda e, k=kind, u=url, lbl=label: self._apply_preset(k, u, lbl))
-            b.bind("<Enter>", lambda e, w=b: w.config(bg=BTN_HOVER))
-            b.bind("<Leave>", lambda e, w=b: w.config(bg=BTN_BG))
+        if self._show_presets:
+            tk.Label(self, text="快速选择", bg=BG, fg=DIM,
+                     font=(FONT, 10)).pack(anchor="w", padx=4, pady=(2, 4))
+            preset_frame = tk.Frame(self, bg=BG)
+            preset_frame.pack(anchor="w", padx=4)
+            for label, kind, url in PRESETS:
+                b = tk.Label(preset_frame, text=label, font=(FONT, 9),
+                             bg=BTN_BG, fg=FG, padx=10, pady=4, cursor="hand2")
+                b.pack(side="left", padx=(0, 6))
+                b.bind("<Button-1>",
+                       lambda e, k=kind, u=url, lbl=label: self._apply_preset(k, u, lbl))
+                b.bind("<Enter>", lambda e, w=b: w.config(bg=BTN_HOVER))
+                b.bind("<Leave>", lambda e, w=b: w.config(bg=BTN_BG))
 
         row_url = tk.Frame(self, bg=BG)
         row_url.pack(fill="x", pady=(8, 0))
@@ -200,6 +209,30 @@ class AddKeyForm(tk.Frame):
         self.save_btn.pack(side="right")
 
         self._set_preview("等待输入 key …")
+        if self._initial:
+            self._apply_initial(self._initial)
+
+    # ---------- 编辑模式预填 ----------
+
+    def _apply_initial(self, initial):
+        """编辑模式:预填名称/URL/key;key 已存在时直接允许保存,不强制探测。"""
+        fg = to_tk_color(PALETTE.TEXT)
+        name = str(initial.get("name") or "").strip()
+        url = str(initial.get("base_url") or "").strip()
+        key = str(initial.get("key") or "").strip()
+        if name:
+            self.name_var.set(name)
+        if url:
+            self.url_var.set(url)
+            self._url_placeholder = False
+            self.url_entry.config(foreground=fg)
+        if key:
+            self.key_entry.delete(0, "end")
+            self.key_entry.insert(0, key)
+            self.key_entry.config(foreground=fg, show="•")
+            self._key_placeholder = False
+            self.save_btn.config(state="normal")
+            self._set_preview("已保存配置;修改后点保存,可点「探测」重新验证。")
 
     # ---------- placeholder ----------
 

@@ -211,7 +211,7 @@ class TestSettingsDialogMacMode(unittest.TestCase):
 class TestAddKeyFormEmbedded(unittest.TestCase):
     """添加 Key 已内嵌为 AddKeyForm(tk.Frame),不再是独立窗口。
 
-    SettingsDialog 同窗口切换「设置 ↔ 添加 Key」两个视图。
+    SettingsDialog 单视图,中间区在「列表 ↔ 表单」间切换。
     """
 
     def setUp(self):
@@ -244,25 +244,28 @@ class TestAddKeyFormEmbedded(unittest.TestCase):
             except tk.TclError:
                 pass
 
-    def test_settings_dialog_swaps_to_add_view(self):
+    def test_settings_dialog_swaps_to_form_and_back(self):
         from ui.settings_dialog import SettingsDialog
         from ui.add_key import AddKeyForm
-        cfg = {"providers": [{"name": "a", "key": "k"}]}
+        cfg = {"providers": [{"id": "a1", "name": "a", "key": "k"}]}
         dlg = SettingsDialog(self.root, cfg, initial_view="add_key")
         try:
-            self.assertIn("添加", dlg.title())
+            # 单视图:标题始终是"设置",中间区切到表单
+            self.assertIn("设置", dlg.title())
             self.assertIsInstance(dlg._form, AddKeyForm)
-            # 原地返回设置视图
-            dlg._show_settings_view()
+            self.assertIsNone(dlg._editing_id)
+            # 返回列表模式
+            dlg._swap_center_list()
             self.assertIn("设置", dlg.title())
             self.assertIsNone(dlg._form)
+            self.assertIsNone(dlg._editing_id)
         finally:
             try:
                 dlg.destroy()
             except tk.TclError:
                 pass
 
-    def test_settings_dialog_add_entry_saved_closes(self):
+    def test_settings_dialog_add_entry_saved_returns_to_list(self):
         from ui.settings_dialog import SettingsDialog
         from ui.add_key import AddKeyForm
         cfg = {"providers": []}
@@ -274,7 +277,10 @@ class TestAddKeyFormEmbedded(unittest.TestCase):
             self.assertIsInstance(dlg._form, AddKeyForm)
             dlg._handle_entry_saved({"name": "n", "key": "sk-x", "base_url": ""})
             self.assertEqual(len(received), 1)
-            self.assertFalse(bool(dlg.winfo_exists()))
+            # 不再关闭对话框,回到列表模式
+            self.assertTrue(bool(dlg.winfo_exists()))
+            self.assertIsNone(dlg._form)
+            self.assertIsNone(dlg._editing_id)
         finally:
             try:
                 dlg.destroy()

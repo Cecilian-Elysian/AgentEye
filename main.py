@@ -130,7 +130,10 @@ def build_actions(root, cfg, state, stop, wake):
             _apply_settings_live()
 
         SettingsDialog(root, cfg, on_save=_on_save,
-                       on_add_key=add_key_entry, initial_view=view)
+                       on_add_key=add_key_entry,
+                       on_update_provider=update_provider,
+                       on_delete_provider=delete_provider_by_id,
+                       initial_view=view)
 
     def _apply_settings_live():
         """设置保存后即时生效:立即唤醒 poller,新配置下次 fetch 生效。"""
@@ -186,7 +189,7 @@ def build_actions(root, cfg, state, stop, wake):
             pass
 
     def add_key():
-        """添加 Key 入口(面板工具栏)→ 设置对话框的添加视图,不开独立窗口。"""
+        """添加 Key 入口(右键菜单)→ 设置对话框内嵌表单模式,不开独立窗口。"""
         open_settings("add_key")
 
     def add_key_entry(entry):
@@ -208,14 +211,27 @@ def build_actions(root, cfg, state, stop, wake):
             pass
         wake.set()
 
-    def delete_provider(name):
+    def update_provider(pid, entry):
+        """按 id 更新 provider 的 name/key/base_url(kind 不变)。"""
+        for p in cfg.get("providers") or []:
+            if p.get("id") == pid:
+                p["name"] = (entry.get("name") or "").strip() \
+                    or p.get("name") or "未命名"
+                p["key"] = entry.get("key") or ""
+                p["base_url"] = entry.get("base_url") or ""
+                config_mod.save_v2(cfg)
+                wake.set()
+                return
+
+    def delete_provider_by_id(pid):
         providers = cfg.get("providers") or []
-        target = next((p for p in providers if p.get("name") == name), None)
+        target = next((p for p in providers if p.get("id") == pid), None)
         if not target:
             return
         base_url = target.get("base_url") or ""
         key = target.get("key") or ""
-        cfg["providers"] = [p for p in providers if p.get("name") != name]
+        name = target.get("name") or pid
+        cfg["providers"] = [p for p in providers if p.get("id") != pid]
         config_mod.save_v2(cfg)
         try:
             import cache as cache_mod
@@ -230,6 +246,22 @@ def build_actions(root, cfg, state, stop, wake):
         except Exception:
             pass
         wake.set()
+
+    def delete_provider(name):
+        """行菜单入口:按名字找到 provider,复用按 id 删除。"""
+        target = next((p for p in cfg.get("providers") or []
+                       if p.get("name") == name), None)
+        if not target:
+            return
+        delete_provider_by_id(target.get("id"))
+
+    def edit_provider(name):
+        """行菜单入口:打开设置对话框并直达该 provider 的编辑表单。"""
+        target = next((p for p in cfg.get("providers") or []
+                       if p.get("name") == name), None)
+        if not target:
+            return
+        open_settings(("edit", target.get("id")))
 
     def probe_model(model_id, base_url, key, timeout=10.0):
         """1-token 试调:返回 (ok, latency_ms, error) 三元组。"""
@@ -278,7 +310,10 @@ def build_actions(root, cfg, state, stop, wake):
         "save_model_order": save_model_order,
         "quit": quit_app,
         "add_key": add_key,
+        "edit_provider": edit_provider,
+        "update_provider": update_provider,
         "delete_provider": delete_provider,
+        "delete_provider_by_id": delete_provider_by_id,
         "probe_model": probe_model,
     }
 
