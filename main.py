@@ -404,5 +404,34 @@ def main():
     wake.set()
 
 
+EXIT_OK = 0
+EXIT_ERROR = 1
+EXIT_CONFIG = 2
+EXIT_NO_REQUESTS = 3
+EXIT_NO_TK = 4
+
+
+def _run():
+    """进程入口:按 AGENTS.md 的退出码契约返回。"""
+    try:
+        import requests  # noqa: F401
+    except ImportError:
+        sys.stderr.write(
+            "缺少依赖 requests,先执行 pip install -r requirements.txt\n")
+        return EXIT_NO_REQUESTS
+    try:
+        main()
+    except ImportError as e:
+        if "tkinter" in str(e):
+            sys.stderr.write(
+                "当前 Python 未包含 tkinter,换官方安装包重装\n")
+            return EXIT_NO_TK
+        raise
+    except Exception as e:
+        sys.stderr.write(f"启动失败:{e.__class__.__name__}: {e}\n")
+        return EXIT_ERROR
+    return EXIT_OK
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_run())
