@@ -289,6 +289,174 @@ class TestSettingsManageActions(unittest.TestCase):
                 pass
 
 
+class TestDuplicateNameRejected(unittest.TestCase):
+    """重名 provider 不允许保存。
+
+    背景:面板用 name 做 self._rows 的键,重名会让其中一行不再被刷新,
+    且行右键的编辑/删除/暂停按 name 查第一个命中,会作用到错误的条目。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        set_theme("dark", broadcast=False, persist=False)
+        cls.root = tk.Tk()
+        cls.root.withdraw()
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.root.destroy()
+        except tk.TclError:
+            pass
+
+    def _cfg(self):
+        return {"providers": [
+            {"id": "p1", "name": "DeepSeek", "kind": "deepseek",
+             "key": "k1", "base_url": "https://api.deepseek.com"},
+            {"id": "p2", "name": "中转站", "kind": "relay",
+             "key": "k2", "base_url": ""},
+        ]}
+
+    def _form(self, cfg, **kwargs):
+        from ui.add_key import AddKeyForm
+        form = AddKeyForm(self.root, **kwargs)
+        self.addCleanup(self._destroy, form)
+        return form
+
+    @staticmethod
+    def _destroy(form):
+        try:
+            form.destroy()
+        except tk.TclError:
+            pass
+
+    def _form_in_dialog(self, cfg, **kwargs):
+        from ui.settings_dialog import SettingsDialog
+        dlg = SettingsDialog(self.root, cfg, **kwargs)
+        self.addCleanup(self._destroy, dlg)
+        return dlg
+
+    # ---------- 纯逻辑:SettingsDialog._taken_names ----------
+
+    def test_taken_names_lists_existing(self):
+        dlg = self._form_in_dialog(self._cfg())
+        self.assertEqual(dlg._taken_names(None), {"DeepSeek", "中转站"})
+
+    def test_taken_names_excludes_the_one_being_edited(self):
+        dlg = self._form_in_dialog(self._cfg())
+        self.assertEqual(dlg._taken_names("p1"), {"中转站"})
+
+    def test_taken_names_skips_blank_names(self):
+        dlg = self._form_in_dialog({"providers": [
+            {"id": "p1", "name": "  ", "key": "k"},
+            {"id": "p2", "name": "", "key": "k"},
+            {"id": "p3", "name": "OK", "key": "k"},
+        ]})
+        self.assertEqual(dlg._taken_names(None), {"OK"})
+
+    def test_taken_names_ignores_non_dict_entries(self):
+        dlg = self._form_in_dialog({"providers": ["垃圾", {"id": "p1",
+                                                          "name": "OK"}]})
+        self.assertEqual(dlg._taken_names(None), {"OK"})
+
+    # ---------- 行为:表单保存被拦下 ----------
+
+    def _fill(self, form, name, key="sk-new"):
+        form.name_var.set(name)
+        form.key_var.set(key)
+        form._key_placeholder = False
+
+    def test_duplicate_name_blocks_save(self):
+        saved = []
+        form = self._form(self._cfg(), on_save=saved.append,
+                          taken_names={"DeepSeek", "中转站"})
+        self._fill(form, "DeepSeek")
+        with _no_messagebox():
+            form._save()
+        self.assertEqual(saved, [], "重名不应触发 on_save")
+
+    def test_duplicate_name_does_not_close_form(self):
+        done = []
+        form = self._form(self._cfg(), on_save=lambda e: None,
+                          on_done=lambda: done.append(True),
+                          taken_names={"DeepSeek"})
+        self._fill(form, "DeepSeek")
+        with _no_messagebox():
+            form._save()
+        self.assertEqual(done, [], "重名不应触发 on_done")
+
+    def test_fresh_name_is_accepted(self):
+        saved = []
+        form = self._form(self._cfg(), on_save=saved.append,
+                          taken_names={"DeepSeek"})
+        self._fill(form, "新的名字")
+        form._save()
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0]["name"], "新的名字")
+
+    def test_empty_name_falls_back_and_is_still_checked(self):
+        saved = []
+        form = self._form(self._cfg(), on_save=saved.append,
+                          taken_names={"未命名"})
+        self._fill(form, "")
+        with _no_messagebox():
+            form._save()
+        self.assertEqual(saved, [], "空名回退成'未命名'后也要查重名")
+
+    def test_taken_names_default_is_empty(self):
+        saved = []
+        form = self._form(self._cfg(), on_save=saved.append)
+        self._fill(form, "DeepSeek")
+        form._save()
+        self.assertEqual(len(saved), 1, "不传 taken_names 时不做重名拦截")
+
+    # ---------- 接线:对话框真的把名单传进表单 ----------
+
+    def test_add_view_passes_taken_names_to_form(self):
+        dlg = self._form_in_dialog(self._cfg(), initial_view="add_key")
+        self.assertEqual(dlg._form._taken_names,
+                         frozenset({"DeepSeek", "中转站"}))
+
+    def test_edit_view_excludes_own_name(self):
+        dlg = self._form_in_dialog(self._cfg(), initial_view=("edit", "p1"))
+        self.assertEqual(dlg._form._taken_names, frozenset({"中转站"}))
+        # 自己原来的名字可以保留,不算冲突
+        saved = []
+        dlg._form.on_save = saved.append
+        dlg._form._key_placeholder = False
+        dlg._form._save()
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0]["name"], "DeepSeek")
+
+    def test_edit_view_cannot_rename_onto_sibling(self):
+        dlg = self._form_in_dialog(self._cfg(), initial_view=("edit", "p1"))
+        saved = []
+        dlg._form.on_save = saved.append
+        dlg._form.name_var.set("中转站")
+        dlg._form._key_placeholder = False
+        with _no_messagebox():
+            dlg._form._save()
+        self.assertEqual(saved, [], "改名撞上兄弟条目应被拦下")
+
+
+class _no_messagebox:
+    """把 messagebox 弹窗换成 no-op,避免测试阻塞在模态框上。"""
+
+    def __enter__(self):
+        import ui.add_key as ak
+        self._orig_warn = ak.messagebox.showwarning
+        self._orig_error = ak.messagebox.showerror
+        ak.messagebox.showwarning = lambda *a, **k: None
+        ak.messagebox.showerror = lambda *a, **k: None
+        return self
+
+    def __exit__(self, *exc):
+        import ui.add_key as ak
+        ak.messagebox.showwarning = self._orig_warn
+        ak.messagebox.showerror = self._orig_error
+        return False
+
+
 class TestMainWiring(unittest.TestCase):
     """main.py 接线源码断言(仿 TestM45Integration 模式)。"""
 

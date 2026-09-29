@@ -19,6 +19,9 @@ essential 单行条带),但**只支持 Windows**,依赖 DPAPI、WinRT toast 与
    `winfo_width() or 300` 兜底(首帧布局未完成时拿到 1 px)。
 5. UI 不直接 import `providers` 适配器模块,只经 `providers/__init__.py` 的注册表。
 6. 配置读写只走 v2 schema(`providers[]`),不要重新引入 v1 的分立数组。
+7. provider 名称必须唯一。`ui/panel.py` 的 `self._rows` 与行级操作都按 `name`
+   索引,重名会让其中一行不再被 `_paint_row` 刷新,且编辑/删除/暂停命中错误条目。
+   新增任何能改名字的入口都要传 `taken_names` 给 `AddKeyForm`。
 7. 保持依赖最小化:运行时仅依赖 `requests`;密钥加密用 `secure.py` 里的
    ctypes 调 DPAPI,通知用 `notify.py` 里的 WinRT + `winsound`。
 

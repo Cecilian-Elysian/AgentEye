@@ -22,6 +22,7 @@
 import threading
 import time
 import tkinter as tk
+from tkinter import messagebox
 
 from providers import detect as detect_mod
 from ui.theme import PALETTE, on_theme_change, to_tk_color, to_tk_color_blended
@@ -43,7 +44,7 @@ class AddKeyForm(tk.Frame):
 
     def __init__(self, parent, on_save=None, on_done=None, generic_probe=None,
                  current_count=0, show_count=True, initial=None,
-                 show_presets=True):
+                 show_presets=True, taken_names=()):
         super().__init__(parent, bg=to_tk_color(PALETTE.BG))
         self.on_save = on_save
         self.on_done = on_done
@@ -54,6 +55,9 @@ class AddKeyForm(tk.Frame):
         self._show_count = show_count
         self._initial = initial if isinstance(initial, dict) else None
         self._show_presets = show_presets
+        # 已被占用的 provider 名字。面板按名字索引行,重名会让其中一行
+        # 不再被刷新,且行级操作(编辑/删除/暂停)会命中错误的那条。
+        self._taken_names = frozenset(taken_names or ())
 
         self._build_ui(current_count)
         on_theme_change(self.refresh_palette)
@@ -365,6 +369,9 @@ class AddKeyForm(tk.Frame):
         name = self.name_var.get().strip() or "未命名"
         if not key:
             return
+        if name in self._taken_names:
+            self._warn_duplicate(name)
+            return
         entry = {
             "name": name,
             "key": key,
@@ -374,6 +381,20 @@ class AddKeyForm(tk.Frame):
             self.on_save(entry)
         if self.on_done:
             self.on_done()
+
+    def _warn_duplicate(self, name):
+        """重名不入库。面板用 name 做行索引,重名会让其中一行不再刷新,
+        且行右键的编辑/删除/暂停会作用到另一条同名 provider。"""
+        try:
+            messagebox.showwarning(
+                "名称重复",
+                f"已存在名为「{name}」的 provider。\n\n"
+                "面板按名称区分每一行,重名会导致行显示不刷新、"
+                "编辑或删除到错误的条目。请换一个名字。",
+                parent=self.winfo_toplevel(),
+            )
+        except tk.TclError:
+            pass
 
 
 def _generic_probe_stub(base_url, key, timeout=8.0):

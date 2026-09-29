@@ -404,8 +404,22 @@ class SettingsDialog(MacToplevel):
             show_count=provider is None,
             initial=initial,
             show_presets=provider is None,
+            taken_names=self._taken_names(pid),
         )
         self._form.pack(fill="both", expand=True)
+
+    def _taken_names(self, editing_id):
+        """除正在编辑的那条外,已被占用的 provider 名字。"""
+        names = set()
+        for p in self._cfg.get("providers") or []:
+            if not isinstance(p, dict):
+                continue
+            if editing_id is not None and p.get("id") == editing_id:
+                continue
+            name = (p.get("name") or "").strip()
+            if name:
+                names.add(name)
+        return names
 
     def _handle_entry_saved(self, entry):
         """表单保存 → 回调宿主写 cfg(新增或更新)→ 回到列表模式。"""
