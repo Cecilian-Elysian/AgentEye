@@ -21,6 +21,7 @@ class State:
         self.paused = False
         self.paused_providers = set()
         self.fetching = False
+        self.poll_error = None
 
 
 class Poller(threading.Thread):
@@ -31,6 +32,10 @@ class Poller(threading.Thread):
         self.stop = stop_event
         self.wake = wake_event
         self.notified = {}
+        try:
+            self.notified = cache_mod.load_alert_state()
+        except Exception:
+            self.notified = {}
 
     def run(self):
         while not self.stop.is_set():
@@ -38,7 +43,7 @@ class Poller(threading.Thread):
                 if self.wake.wait(0.5):
                     self.wake.clear()
                 continue
-            self.fetch_once()
+            self._safe_fetch_once()
             interval = config_mod.clamp_interval_v2(self.cfg)
             end = time.time() + interval
             self.state.next_fetch = end
@@ -48,6 +53,20 @@ class Poller(threading.Thread):
                     break
                 if self.state.paused:
                     break
+
+    def _safe_fetch_once(self):
+        """轮询兜底:异常绝不能让本线程退出。
+
+        线程一旦死掉,面板会永远停在旧数据上,而界面上没有任何提示。
+        这里吞掉异常记到 state.poll_error,下一轮继续。
+        """
+        try:
+            self.fetch_once()
+        except Exception as e:
+            self.state.poll_error = f"{e.__class__.__name__}: {e}"
+            self.state.last_fetch = time.time()
+        else:
+            self.state.poll_error = None
 
     def fetch_once(self):
         self.state.fetching = True
@@ -80,7 +99,7 @@ class Poller(threading.Thread):
             items.append((r["name"], verb))
         if items:
             try:
-                cache_mod.save_alert_state(now)
+                cache_mod.save_alert_state(self.notified)
             except Exception:
                 pass
             notify.alert_many(items)

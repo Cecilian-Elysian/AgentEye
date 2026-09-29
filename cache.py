@@ -119,18 +119,48 @@ def log_probe(provider_name, model_id, success, latency_ms, error=""):
         f.write(json.dumps(line, ensure_ascii=False) + "\n")
 
 
-def save_alert_state(last_alert_ts):
-    """原子保存最近一次告警时间戳,用于埋点和未来扩展。
+def save_alert_state(notified):
+    """原子保存 per-provider 告警冷却状态,让 60 分钟冷却跨重启生效。
 
-    当前 Poller 已不再做全局节流(改硬编码 per-provider 60min 冷却),
-    但保留接口以便后续扩展;参数被直接持久化,旧 `load_alert_state` 已删除。
+    notified 形如 ``{"DeepSeek": ["critical", 1758000000.0], ...}``。
+    内容非法时按空表处理,不阻塞主流程。
     """
     _ensure()
-    try:
-        ts = float(last_alert_ts)
-    except (TypeError, ValueError):
-        ts = 0.0
-    _save_json(ALERT_STATE, {"last_alert_ts": ts})
+    clean = {}
+    if isinstance(notified, dict):
+        for name, value in notified.items():
+            if not isinstance(name, str) or not isinstance(value, (list, tuple)):
+                continue
+            if len(value) != 2:
+                continue
+            level, ts = value
+            if level not in ("warn", "critical"):
+                continue
+            try:
+                clean[name] = [level, float(ts)]
+            except (TypeError, ValueError):
+                continue
+    _save_json(ALERT_STATE, {"notified": clean})
+
+
+def load_alert_state():
+    """读取告警冷却状态。缺失、损坏或旧版单 ts 格式一律返回 {}。"""
+    _ensure()
+    data = _load_json(ALERT_STATE)
+    raw = data.get("notified")
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for name, value in raw.items():
+        if not isinstance(name, str) or not isinstance(value, (list, tuple)):
+            continue
+        if len(value) != 2 or value[0] not in ("warn", "critical"):
+            continue
+        try:
+            out[name] = [value[0], float(value[1])]
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def remove_provider_entries(base_url, api_key):

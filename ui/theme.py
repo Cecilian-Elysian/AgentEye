@@ -5,7 +5,7 @@
 - 模块级 PALETTE 代理当前 active palette,所有调用方保持 PALETTE.BG / PALETTE.TEXT 不变
 - set_theme("dark"|"light"|"auto") 切换;Auto 用 detect_system_theme()
 - on_theme_change(cb) 注册监听,MacWindow.apply_theme() 会回调
-- detect_system_theme() 优先 darkdetect,失败则平台 fallback
+- detect_system_theme() 走标准库 winreg,不依赖任何第三方库
 
 约定:
 - HEX 默认 6 位;需要 alpha 时用 8 位 #RRGGBBAA 字符串
@@ -144,15 +144,10 @@ def _resolve(name):
 
 
 def detect_system_theme():
-    """探测系统主题。优先 darkdetect,失败则平台 fallback,最后默认 dark。"""
-    try:
-        import darkdetect
-        result = darkdetect.theme()
-        if result and result.lower() in ("dark", "light"):
-            return result.lower()
-    except Exception:
-        pass
+    """探测系统主题。Windows 走 winreg 的 AppsUseLightTheme,失败默认 dark。
 
+    刻意不依赖第三方库:winreg 是标准库,行为在任何机器上一致。
+    """
     if sys.platform == "win32":
         try:
             import winreg
@@ -160,8 +155,10 @@ def detect_system_theme():
                 winreg.HKEY_CURRENT_USER,
                 r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
             )
-            value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
-            winreg.CloseKey(key)
+            try:
+                value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            finally:
+                winreg.CloseKey(key)
             return "light" if value == 1 else "dark"
         except Exception:
             pass

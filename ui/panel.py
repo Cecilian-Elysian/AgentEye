@@ -818,9 +818,12 @@ class Panel:
                 self._paint_row(widgets, r)
 
         levels = [r.get("level") for r in results]
+        poll_error = getattr(self.state, "poll_error", None)
         dot = getattr(self, "dot", None)
         if dot is not None:
-            if self.state.paused:
+            if poll_error:
+                dot.config(fg=C["error"])
+            elif self.state.paused:
                 dot.config(fg=C["off"])
             elif "critical" in levels:
                 dot.config(fg=C["critical"])
@@ -833,7 +836,9 @@ class Panel:
 
         footer = getattr(self, "footer", None)
         if footer is not None:
-            if self.state.paused:
+            if poll_error:
+                text = f"轮询出错:{poll_error}"
+            elif self.state.paused:
                 text = "已暂停轮询"
             elif self.state.fetching:
                 text = "刷新中…"
@@ -841,7 +846,7 @@ class Panel:
                 text = f"下次刷新 {_fmt_countdown(self.state.next_fetch - time.time())}"
             else:
                 text = "等待首次刷新…"
-            footer.config(text=text)
+            footer.config(text=text, fg=C["error"] if poll_error else C["dim"])
 
     def _rebuild(self, results):
         for child in self.rows_frame.winfo_children():
