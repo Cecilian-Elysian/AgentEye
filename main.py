@@ -19,6 +19,7 @@ class State:
         self.last_fetch = 0.0
         self.next_fetch = 0.0
         self.paused = False
+        self.paused_providers = set()
         self.fetching = False
 
 
@@ -51,7 +52,7 @@ class Poller(threading.Thread):
     def fetch_once(self):
         self.state.fetching = True
         try:
-            results = fetch_all(self.cfg)
+            results = fetch_all(self.cfg, skip_names=self.state.paused_providers)
         finally:
             self.state.fetching = False
         self.state.results = results
@@ -115,9 +116,10 @@ def build_actions(root, cfg, state, stop, wake):
             notify.beep()
 
     def open_config():
+        # os.startfile 只存在于 Windows;其他平台抛 AttributeError,故捕 Exception
         try:
             os.startfile(str(config_mod.CONFIG_PATH))
-        except OSError:
+        except Exception:
             pass
 
     def open_settings(view=None):
@@ -263,7 +265,44 @@ def build_actions(root, cfg, state, stop, wake):
             return
         open_settings(("edit", target.get("id")))
 
-    def probe_model(model_id, base_url, key, timeout=10.0):
+    def pause_provider(name):
+        """行菜单入口:单独暂停/恢复某个 provider 的轮询。"""
+        if not name:
+            return
+        if name in state.paused_providers:
+            state.paused_providers.discard(name)
+            verb = "已恢复"
+        else:
+            state.paused_providers.add(name)
+            verb = "已暂停"
+        wake.set()
+        try:
+            notify.alert("AgentEye", f"{verb}:{name}")
+        except Exception:
+            pass
+
+    def probe_models(name):
+        """行菜单入口:对缓存模型列表的首个模型发 1-token 试调并弹结果。"""
+        target = next((p for p in cfg.get("providers") or []
+                       if p.get("name") == name), None)
+        if not target:
+            return
+        base_url = target.get("base_url") or ""
+        key = config_mod.plain_key(target)
+        if not base_url or not key:
+            notify.alert("AgentEye", f"{name} 缺少 base_url 或 key,无法试调")
+            return
+        models = cache_mod.get_models(base_url, key) or []
+        if not models:
+            notify.alert("AgentEye", f"{name} 没有模型缓存,先查看模型列表")
+            return
+        model_id = models[0]
+        ok, latency, err = probe_model(model_id, base_url, key,
+                                       provider_name=name)
+        detail = f"{latency:.0f}ms" if ok else (err or "试调失败")
+        notify.alert("AgentEye", f"{name} · {model_id} · {detail}")
+
+    def probe_model(model_id, base_url, key, timeout=10.0, provider_name=""):
         """1-token 试调:返回 (ok, latency_ms, error) 三元组。"""
         import requests
         if not base_url or not key:
@@ -288,7 +327,7 @@ def build_actions(root, cfg, state, stop, wake):
             return False, latency, f"HTTP {r.status_code}"
         import cache
         try:
-            cache.log_probe(provider_name="", model_id=model_id,
+            cache.log_probe(provider_name=provider_name, model_id=model_id,
                             success=True, latency_ms=latency)
         except Exception:
             pass
@@ -312,6 +351,8 @@ def build_actions(root, cfg, state, stop, wake):
         "add_key": add_key,
         "edit_provider": edit_provider,
         "update_provider": update_provider,
+        "pause_provider": pause_provider,
+        "probe_models": probe_models,
         "delete_provider": delete_provider,
         "delete_provider_by_id": delete_provider_by_id,
         "probe_model": probe_model,

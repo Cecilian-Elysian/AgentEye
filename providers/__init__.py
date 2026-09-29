@@ -23,6 +23,9 @@ PLACEHOLDER_KEYS = {
 }
 
 
+LEVEL_PAUSED = "paused"
+
+
 def collect_entries(cfg):
     """v2 schema:从 cfg['providers'] 收集所有条目。"""
     out = []
@@ -32,13 +35,44 @@ def collect_entries(cfg):
     return out
 
 
-def fetch_all(cfg):
+def fetch_all(cfg, skip_names=None):
+    """并发拉取所有 provider。skip_names 里的条目不发请求,直接返回 paused 行。"""
     entries = collect_entries(cfg)
     if not entries:
         return []
-    with ThreadPoolExecutor(max_workers=max(4, len(entries))) as ex:
-        futures = [ex.submit(_one, kind, entry, cfg) for kind, entry in entries]
-        return [f.result() for f in futures]
+    skip = set(skip_names or ())
+    paused = [(k, e) for k, e in entries if e.get("name") in skip]
+    todo = [(k, e) for k, e in entries if e.get("name") not in skip]
+    results = []
+    if todo:
+        with ThreadPoolExecutor(max_workers=max(4, len(todo))) as ex:
+            futures = [ex.submit(_one, kind, entry, cfg)
+                       for kind, entry in todo]
+            results = [f.result() for f in futures]
+    results.extend(_paused(kind, entry) for kind, entry in paused)
+    return results
+
+
+def _paused(kind, entry):
+    """被用户手动暂停的 provider:不发请求,也不产生告警。"""
+    return {
+        "id": entry.get("id"),
+        "name": entry.get("name") or f"{kind}-provider",
+        "type": kind,
+        "kind": kind,
+        "remaining": None,
+        "used": None,
+        "total": None,
+        "unit": "",
+        "pct": None,
+        "detail": "已暂停轮询",
+        "is_estimate": False,
+        "updated_at": time.time(),
+        "error": None,
+        "unconfigured": False,
+        "paused": True,
+        "level": LEVEL_PAUSED,
+    }
 
 
 def _resolve_key(entry):
@@ -138,6 +172,8 @@ def _level(res, entry, cfg):
 
 
 def fmt_main(res):
+    if res.get("paused"):
+        return "已暂停"
     if res.get("unconfigured"):
         return "未配置"
     if res.get("error"):

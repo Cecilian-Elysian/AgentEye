@@ -22,6 +22,7 @@ LEVEL_WARN = "warn"
 LEVEL_CRITICAL = "critical"
 LEVEL_ERROR = "error"
 LEVEL_UNCONFIGURED = "unconfigured"
+LEVEL_PAUSED = "paused"
 LEVEL_UNKNOWN = "unknown"
 
 
@@ -243,6 +244,7 @@ LEVEL_COLOR = {
     LEVEL_CRITICAL: PALETTE.CRITICAL,
     LEVEL_ERROR: PALETTE.ERROR,
     LEVEL_UNCONFIGURED: PALETTE.OFF,
+    LEVEL_PAUSED: PALETTE.OFF,
     LEVEL_UNKNOWN: PALETTE.UNKNOWN,
 }
 
@@ -259,6 +261,7 @@ def _refresh_level_color():
     LEVEL_COLOR[LEVEL_CRITICAL] = PALETTE.CRITICAL
     LEVEL_COLOR[LEVEL_ERROR] = PALETTE.ERROR
     LEVEL_COLOR[LEVEL_UNCONFIGURED] = PALETTE.OFF
+    LEVEL_COLOR[LEVEL_PAUSED] = PALETTE.OFF
     LEVEL_COLOR[LEVEL_UNKNOWN] = PALETTE.UNKNOWN
 
 
@@ -412,7 +415,7 @@ __all__ = [
     "PALETTE", "Layout", "Typography",
     "LEVEL_COLOR", "level_color",
     "LEVEL_OK", "LEVEL_WARN", "LEVEL_CRITICAL", "LEVEL_ERROR",
-    "LEVEL_UNCONFIGURED", "LEVEL_UNKNOWN",
+    "LEVEL_UNCONFIGURED", "LEVEL_PAUSED", "LEVEL_UNKNOWN",
     "hex_with_alpha", "to_tk_color", "to_tk_color_blended",
     "current_text", "current_text_dim", "current_text_disabled",
     "current_divider", "blend", "usage_color",

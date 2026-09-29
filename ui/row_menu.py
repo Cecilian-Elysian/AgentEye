@@ -20,7 +20,7 @@ class RowMenu:
         self.menu.add_command(label="试调模型…", command=on_probe)
         self.menu.add_separator()
         self.menu.add_command(label="编辑此 provider", command=on_edit)
-        self.menu.add_command(label="暂停此 provider", command=on_pause)
+        self.menu.add_command(label="暂停/恢复此 provider", command=on_pause)
         self.menu.add_separator()
         self.menu.add_command(label="复制 key", command=on_copy_key)
         self.menu.add_command(label="复制 base URL", command=on_copy_url)

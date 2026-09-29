@@ -34,6 +34,7 @@ C = {
 
 LEVEL_COLOR = {k: C[k] for k in ("ok", "warn", "critical", "error")}
 LEVEL_COLOR["unconfigured"] = C["off"]
+LEVEL_COLOR["paused"] = C["off"]
 LEVEL_COLOR["unknown"] = C["dim"]
 
 EDGE_SNAP = 20
@@ -71,6 +72,7 @@ def _refresh_C():
     LEVEL_COLOR["critical"] = C["critical"]
     LEVEL_COLOR["error"] = C["error"]
     LEVEL_COLOR["unconfigured"] = C["off"]
+    LEVEL_COLOR["paused"] = C["off"]
     LEVEL_COLOR["unknown"] = C["dim"]
 
 
@@ -1003,7 +1005,7 @@ class Panel:
             fn = self.actions.get("probe_model")
             if not fn:
                 return False, 0.0, "未配置 probe_model"
-            return fn(model_id, base_url, key)
+            return fn(model_id, base_url, key, provider_name=name)
 
         save_model_order = self.actions.get("save_model_order")
         def _on_reorder(new_order):
@@ -1025,6 +1027,8 @@ class Panel:
 
         level = r.get("level", "unknown")
         if ratio_val is None or r.get("unconfigured"):
+            color = C["off"]
+        elif level == "paused":
             color = C["off"]
         elif level in ("error",):
             color = C["error"]
