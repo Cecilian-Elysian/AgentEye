@@ -1,217 +1,125 @@
 # AgentEye
 
-> 常驻桌面的多 Key 额度观察工具。粘贴 key 即用,自动识别 provider 类型,
-> 自动拉取可用模型列表,实时显示总额度与各 provider 明细。
+Windows 桌面常驻的多 Key AI 额度观察工具，粘贴 key 即用
 
-## 特性
 
-### 监控与告警
+## 使用
 
-- **粘贴 key 即用**:Add Key 对话框自动识别 provider(OpenAI 兼容 / 中转站 / MiniMax / OpenCode Go / DeepSeek / 智谱)
-- **5 个一键预设**:Add Key 顶部 5 个按钮(MiniMax / DeepSeek / 智谱 / OpenCode / 中转站),点一下自动填默认 URL 和名称
-- **金额/额度双视图**:金额行(`$ ¥ 额度`)无进度条 + 💰 前缀 + 暖色底;百分比行带渐变进度条
-- **今日已用 / 总额**:中转站显示 `今日 $X.XX / $Y.YY`,百分比行继续显示 `5h% · 周% · 倒计时`
-- **消耗渐变色**:绿→黄→红三色插值,基于 `used_today/total` 计算消耗比,主值与 detail 中所有 `$X` / `¥X` / `X%` 同步上色
-- **per-provider 告警冷却**:同一 provider 同等级告警 60 分钟内不重复弹;等级切换(warn → critical)算新告警
+方法一（普通用户）：
 
-### 窗口与交互
+双击 `run.bat` 启动（后台 `pythonw`，无控制台窗口）
 
-- **窗口可拖拽 resize**:右下角 grip 调整面板大小(280×180 ~ 800×900),实时自适应 wraplength
-- **主面板 + 模型面板 拖拽重排**:长按 > 8 px 触发,红线指示器,顺序持久化;模型面板拖完自动触发一次额度刷新
-- **窗口固定按钮**:Header `⊙` / `○` 切换 topmost,状态持久化
-- **最小化按钮**:Header `–` 最小化到任务栏,点击任务栏还原(自动恢复无边框 + 置顶)
-- **Header 风格统一**:`≡ ⊙ – ×` 全部为 flat 深色按钮,hover 高亮
-- **主面板滚动条**:窗口缩小或 provider 多时,右侧滚动条 + 滚轮滚动查看
-- **边缘磁吸 + 快捷键**:F5 刷新,Ctrl+Q 退出,Esc 关闭弹窗,聚焦时自动刷新
+方法二（项目测试）：
 
-### 模型与试调
-
-- **模型列表自动拉取**:每个 provider 显示 `/v1/models`,按能力分组(Claude / GPT / Gemini / ...),支持搜索(计数实时更新,拖动不跳滚动位)
-- **1-token 试调**:点击"试调"发送 1 token 请求,显示延迟,记录到 `~/.agenteye/cache/probe.jsonl`
-- **价格计算器**:模型详情面板估算 N 次调用的花费(常见模型公开价表)
-
-### 配置与管理
-
-- **设置界面**:Header `≡` 打开,改刷新间隔、¥ 临界阈值、% 告警阈值 + 主题切换;"添加 API Key" 在同一窗口内切换视图(5 预设 + 自动探测),不弹独立窗口
-- **删除确认**:右键删除 provider 需输入名字确认,同时清理 models 缓存并追加 probe 日志标记
-- **首启欢迎 toast**:首次启动给出操作提示
-- **v1 自动迁移**:旧的 5 个分立数组配置自动升级为统一 `providers[]`,备份为 `config.json.v1.bak`
-
-## 快速开始
+进入项目根目录
 
 ```
-git clone ...
-双击 run.bat
+安装依赖
+pip install -r requirements.txt
+
+前台运行，报错直接打在控制台
+python main.py
 ```
 
-依赖: `requests`、`tkinter`(标准库)。
+方法三（项目测试）：
+
+只想验证界面不打算接任何 provider：
 
 ```
-run.bat          双击(后台 pythonw,无控制台)
-python main.py   前台运行便于看报错
+.venv\Scripts\python.exe main.py
 ```
 
-## 配置 schema (v2)
+> 启动后会在屏幕右侧出现一个无边框小面板，默认 360×360，可拖到屏幕任意位置并在拖动时自动吸附到 20 px 内的屏幕边缘，右下角 grip 可在 280×180 ~ 800×900 之间拉伸；标题栏三个交通灯从左到右分别是黄（最小化到任务栏）、绿（打开设置）、红（退出），面板右上角的小圆点实时反映全局最差等级（绿=全部正常、橙=有偏低、红=有告急或查询失败、灰=轮询已暂停）；点标题栏空白处或行与行之间的空隙可拖动窗口，按住某一 provider 行拖动超过 8 px 则进入重排模式并显示一条蓝色指示线，松手后顺序写入配置并在下次启动时保持；单击某一行的数值是复制剩余值到剪贴板；右键行会弹出「立即刷新此行 / 查看模型列表 / 试调模型… / 编辑此 provider / 暂停或恢复此 provider / 复制 key / 复制 base URL / 删除此 provider」，删除必须输入 provider 名字二次确认，并会一并清掉它的模型列表缓存、在试调日志里追加一条 `provider_deleted` 标记；模型列表面板会拉取该 provider 的 `/v1/models` 并按能力分组，支持搜索（命中数实时更新）和拖拽重排（顺序持久化，点「试调」发一个 `max_tokens=1` 的请求测延迟并把结果记进 `probe.jsonl`，模型详情里还能按内置价表估算 N 次调用的花费）；设置窗口在同一位置切换「列表 ↔ 表单」两个视图，列表里可以逐条编辑或删除 provider，点「添加 API Key」进入表单，顶部五个预设按钮（MiniMax / DeepSeek / 智谱 GLM / OpenCode / 中转站）一点就自动填好默认 base URL 和名称，填入 key 后会自动探测并预览识别出的 provider 类型；面板有折叠与展开两态，折叠态收成 240 px 宽的单行条带（条带本身 56 px 高，另加标题栏，宽度锁定不可拉伸），只显示最差的那个 provider 的主值与次值，点条带任一处或右键菜单「切换为单行模式」可来回切换，两态选择会记住；
+主题有深色 / 浅色 / 跟随系统三档，切换即时生效；告警只在低于阈值时弹，同一 provider 同一等级 60 分钟内不重复弹，等级从 warn 升到 critical 视为新告警会再弹一次，剩余人民币 ≤ 临界值弹「额度告急」，剩余百分比 ≤ 阈值弹「额度偏低」，一次轮询内多个 provider 同时告警会合并成一条 toast；快捷键为 F5 立即刷新、Ctrl+Q 退出、Esc 关闭当前弹窗，窗口获得焦点时自动触发一次刷新；首次启动会弹一条欢迎提示，右键面板空白处有「立即刷新 / 通知测试 / 添加 Key… / 暂停轮询 / 切换为单行模式 / 打开配置文件 / 设置… / 退出」。
 
-`~/.agenteye/config.json`:
+配置项（均可通过设置窗口修改，配置文件是 `~/.agenteye/config.json`）：
 
-```json
-{
-  "schema_version": 2,
-  "refresh_interval_sec": 30,
-  "alert": {
-    "enable": true,
-    "warn_pct": 30,
-    "critical_amount_yuan": 5.0
-  },
-  "ui": {"x": null, "y": null, "width": 360, "height": 360, "order": [], "pinned": true},
-  "providers": [
-    {"id": "abc123", "kind": "minimax", "name": "MiniMax M3",
-     "key": "sk-cp-...", "base_url": "https://api.minimaxi.com",
-     "extra": {}},
-    {"id": "def456", "kind": "generic_openai", "name": "某中转",
-     "key": "sk-...", "base_url": "https://api.example.com/v1",
-     "extra": {}}
-  ]
-}
-```
-
-环境变量覆盖: `MINIMAX_API_KEY` / `OPENCODE_GO_API_KEY` / `DEEPSEEK_API_KEY`,
-或在条目里写 `"api_key_env": "自定义环境变量名"`。
-
-告警级别判定:
-
-| 单位 | 触发条件 |
-|---|---|
-| `¥` | 剩余金额 ≤ `alert.critical_amount_yuan`(默认 5)→ 红 |
-| `%` | 剩余百分比 ≤ `alert.warn_pct`(默认 30)→ 黄 |
-| `$` / 其他 | 不做阈值判断,一直 `ok` |
-
-per-provider 60 min 硬编码冷却:同一 provider 同等级不重复弹,跨等级 / 跨 provider 不合并。
-
-## 支持的 provider
-
-| kind | 接口 | 显示 |
+| 配置 | 默认值 | 作用 |
 |---|---|---|
-| `relay` | 自动探测 6 种中转站端点 | 余额 / 已用 |
-| `minimax` | 按 key 前缀选 `coding_plan` / `token_plan` | 5h% + 周% + 倒计时 |
-| `opencode_go` | `opencode.ai/zen/go/v1/usage` | 5h / 周 / 月估算金额 |
-| `deepseek` | `api.deepseek.com/user/balance` | 总余额 + 赠金/充值拆分 |
-| `zhipu` | `open.bigmodel.cn/api/monitor/usage/quota/limit` | 5h / 周% + 倒计时 + 套餐档位 |
-| `generic_openai` | 探测 `/v1/models` + 4 种 quota endpoint | 模型列表 + 余额 |
+| `refresh_interval_sec` | `30` | 轮询各 provider 的周期，15–3600 秒 |
+| `alert.enable` | `true` | 总开关，关掉后不再弹任何告警 |
+| `alert.critical_amount_yuan` | `5.0` | 人民币剩余 ≤ 此值判为 critical（红） |
+| `alert.warn_pct` | `30` | 剩余百分比 ≤ 此值判为 warn（橙） |
+| `ui.theme` | `auto` | `dark` / `light` / `auto`（跟随系统） |
+| `ui.pinned` | `true` | 是否置顶 |
+| `ui.mode` | `standard` | `standard` 展开面板 / `essential` 单行条带 |
+| `ui.x` / `ui.y` | `null` | 窗口位置，`null` 时首次运行放在屏幕右侧 |
+| `ui.width` / `ui.height` | `360` | 窗口尺寸 |
+| `ui.order` | `[]` | provider 行顺序 |
 
-## 窗口操作
+`config.json` 缺失时会自动创建一份空模板并落盘；内容非法（JSON 错误或字段类型不对）时按空配置处理，v1 旧 schema（`relay_sites` / `minimax` / `opencode_go` / `deepseek` / `zhipu` 五个分立数组）会被自动迁移成统一的 `providers[]`，原文件备份为 `config.json.v1.bak`。API Key 优先读环境变量 `MINIMAX_API_KEY` / `OPENCODE_GO_API_KEY` / `DEEPSEEK_API_KEY` / `ZHIPU_API_KEY`，也可在条目里写 `"api_key_env": "自定义变量名"` 指定其他变量；写盘时 key 经 Windows DPAPI 加密成 `key_enc`，内存里始终保持明文。
 
-- **拖动**:按住空白处(标题/底部/行间空隙)拖,自动边缘磁吸(< 20 px 贴边);行内按下拖动是重排,不会移动窗口
-- **拖拽重排行**:按住行任何位置超过 8 px 进入拖拽模式,出现红色指示线,松开释放
-- **调整大小**:右下角 grip(`size_nw_se` 光标)拖动改变面板大小,内部自适应
-- **光标**:拖动时 `fleur`,行 hover `hand2`,× 按钮 hover 变红
-- **点击数值**:无移动 → 复制到剪贴板;有移动 → 拖拽重排
-- **右键行**:刷新此行 / 查看模型 / 试调 / 编辑 / 暂停 / 复制 key / 复制 URL / 删除(删除需输入名字确认)
-- **点击 ≡ 按钮**:打开设置界面(刷新间隔 / ¥ 临界阈值 / % 告警阈值 / 主题)
-- **点击 ⊙ / ○ 按钮**:切换窗口固定(topmost)
-- **点击 – 按钮**:最小化到任务栏,点击任务栏图标还原
-- **右键菜单**:立即刷新 / 通知测试 / 添加 Key / 暂停 / 打开配置 / 退出
-- **键盘**: F5 刷新, Ctrl+Q 退出, Esc 关闭弹窗, 窗口聚焦时自动刷新
 
-## 行颜色
+## 开发检查
 
-- 绿 = 正常(`ok`)
-- 黄 = 低于预警(`warn`)
-- 红 = 低于告急或查询失败(`critical` / `error`)
-- 灰 = 未配置(`unconfigured`)
-
-**渐变插值**:`_usage_ratio` 返回 0..1,绿(`#53d77a`) → 黄(`#f0c24b`) → 红(`#ff5d5d`)
-三段线性插值;金额行主值和 detail 中所有 `$X` / `¥X` / `X%` 段统一上色。
-
-**行类型**:
-- 金额行(`unit ∈ {$ ¥ ￥ 额度 元}`):无底部进度条,💰 前缀,微调暖色底 `#1d1b25`
-- 百分比行:保留 5 px 渐变 canvas 进度条,normal card 底
-
-> 进度条绘制由 `<Configure>` 事件驱动,首帧布局完成 / 窗口 resize 时 Tk 自动用真实 `event.width` 重画,不存在"刚打开看不见"或"resize 后宽度错位"问题。
-
-## 缓存与日志
-
-| 文件 | 用途 |
-|---|---|
-| `~/.agenteye/config.json` | 主配置(原子写,`.tmp` + `os.replace`) |
-| `~/.agenteye/config.json.v1.bak` | v1 → v2 迁移时自动备份 |
-| `~/.agenteye/cache/models.json` | 模型列表缓存(TTL 6 h,按 base_url + key hash) |
-| `~/.agenteye/cache/probe.jsonl` | 试调日志(append-only) |
-| `~/.agenteye/cache/alert_state.json` | 告警时间戳(per-provider 冷却持久化) |
-
-## 测试
-
-```
-python -m unittest discover tests
+```text
+pip install -r requirements-dev.txt
+python -m pytest tests -q
 ```
 
-当前 **266 个测试用例** 覆盖:
 
-- `detect` / `generic` / `cache`(含 provider 删除清理)/ `migration` / `panel` 渐变 / 金额行模式 / 拖拽重排
-- 设置校验 / AddKey placeholder / 滚动条结构 / 删除确认 / 模型面板分组与重排回调 / 重建后重绘回归
-- **告警 per-provider 冷却** (`test_fire_alerts.py`):基本弹发、禁用不弹、ok 忽略、同 provider 同 level 60min 冷却、warn→critical 算新告警、多 provider 各弹
-- **首帧进度条** (`test_panel_bar.py`):不调 `update_idletasks` 时 Tk `<Configure>` 仍正确驱动 rect、resize 后 handler 用 `event.width` 重画
+## 文件结构
 
-## 已知边界
-
-- OpenCode Zen 按量余额:官方无 API,只做 Go 订阅
-- MiniMax 按量付费余额:无稳定公开接口,只做套餐类查询
-- SiliconFlow:官方已下线余额接口,无法接入
-- 价格表:仅内置 gpt-4o / claude-3.5 / deepseek / glm-4 几个常见模型,其它需手填或在价表扩展
-
-## 架构
-
+开发板
 ```
-main.py             入口,Poller 线程 + tk mainloop
-config.py           v1 + v2 schema,load_v2 自动迁移,原子写
-cache.py            models_cache (TTL, 含 order) + probe_log (JSONL)
-                    + alert_state (per-provider 冷却时间戳)
-notify.py           alert_many 合并 toast
-providers/
-  __init__.py       注册表,collect_entries / fetch_all / _level(¥ 临界 + % 警告)
-  detect.py         key 前缀 + URL 提示识别 kind
-  generic.py        OpenAI 兼容探测 + 4 种 quota parser
-  relay.py / minimax.py / opencode_go.py / deepseek.py / zhipu.py   5 内置 provider
-ui/
-  panel.py          主面板:provider 行 + 滚动条 + 拖拽/拖动/resize
-                    进度条由 <Configure> 事件驱动
-  row_menu.py       行右键菜单(删除走输入名字确认)
-  confirm_delete.py 危险操作确认:输入名字才能确认
-  model_panel.py    模型列表 + 拖拽重排 + 搜索 + 分组 + 试调 + 价格计算
-  add_key.py        Add Key 表单:5 预设 + placeholder + 预览(内嵌组件,
-                    由 settings_dialog 同窗口承载,无独立窗口)
-  settings_dialog.py   设置界面:刷新间隔 / ¥ 临界 / % 警告 / 主题;
-                    "添加 API Key" 原地切换到添加视图
+AgentEye/
+├─ .gitignore                  # 忽略 __pycache__、.venv、截图与调试产物
+├─ AGENTS.md                   # 工程契约：定位、编码风格、密钥契约、测试、退出码
+├─ README.md                   # 使用、配置、文件结构、注意事项
+├─ requirements.txt            # 运行依赖：requests
+├─ requirements-dev.txt        # 开发依赖：pytest
+├─ config.example.json         # config.json 的 v2 schema 示例
+├─ run.bat                     # 双击启动（pythonw，无控制台）
+├─ main.py                     # 入口、Poller 线程、actions 装配、退出码
+├─ config.py                   # v2 schema、load/save_v2、v1 迁移、原子写
+├─ secure.py                   # Windows DPAPI 加解密（ctypes，无第三方依赖）
+├─ cache.py                    # models.json(TTL) / probe.jsonl / alert_state.json
+├─ notify.py                   # WinRT toast，失败回退 winsound
+├─ providers/
+│  ├─ __init__.py              # kind 注册表、fetch_all、_level 阈值、_resolve_key
+│  ├─ detect.py                # key 前缀 + base URL 推断 kind
+│  ├─ generic.py               # OpenAI 兼容探测 + 多种 quota 端点解析
+│  ├─ relay.py                 # 中转站余额
+│  ├─ minimax.py               # 套餐 5h / 周用量
+│  ├─ opencode_go.py           # OpenCode Go 订阅用量
+│  ├─ deepseek.py              # 余额 + 赠金/充值拆分
+│  └─ zhipu.py                 # 智谱 5h / 周额度
+├─ ui/
+│  ├─ app.py                   # MacWindow 窗口壳、essential/standard 两态、交通灯
+│  ├─ panel.py                 # 主面板：provider 行、滚动条、拖拽重排、拖动、resize
+│  ├─ essential_bar.py         # 折叠态单行条带
+│  ├─ model_panel.py           # 模型列表、分组、搜索、拖拽重排、试调、价格估算
+│  ├─ row_menu.py              # 行级右键菜单（删除走输入名字确认）
+│  ├─ settings_dialog.py       # 设置 + provider 列表管理（列表 ↔ 表单切换）
+│  ├─ add_key.py               # Add Key 表单：5 预设 + 自动探测（内嵌组件）
+│  ├─ confirm_delete.py        # 危险操作确认：输入名字才能确认
+│  ├─ mac_toplevel.py          # macOS 风对话框基类：标题栏 + 交通灯 + 拖拽
+│  ├─ theme.py                 # 深/浅色 palette、等级色、渐变插值、主题订阅
+│  ├─ fonts.py                 # 跨平台字体挑选
+│  ├─ scrollbar_style.py       # 自绘滚动条样式
+│  └─ vibrancy.py              # Win11 圆角/DWM 背景/暗标题栏，macOS 与 Linux 为占位
+└─ tests/
+   ├─ conftest.py              # Tk root 创建重试补丁，消 Windows TclError 抖动
+   ├─ test_secure.py           # DPAPI 往返与明文/密文契约
+   ├─ test_pause_and_actions.py # 按 provider 暂停、action 接线完整性、死代码守卫
+   ├─ test_style.py            # 运行时源码无 emoji 守卫
+   ├─ test_smoke.py            # 三条启动链路集成测试
+   ├─ test_m1..m7_*.py         # 窗口壳 / 两态 / 主题 / 对话框 / 设置管理
+   └─ test_*.py                # detect、cache、迁移、面板、告警、拖拽等
 ```
 
-## 更新日志
 
-### v2.3 (添加 Key 内嵌)
+## 注意事项
 
-- `refactor(ui)`:删除独立 AddKeyDialog 窗口,重构为可内嵌 AddKeyForm;SettingsDialog 同窗口切换「设置 ↔ 添加 Key」视图
-- `refactor(main)`:面板工具栏"添加"入口 → 直接打开设置对话框的添加视图(initial_view)
+- Windows 10/11，64 位；macOS / Linux 风格代码（vibrancy 圆角、圆点）只是视觉取向，不承诺可用
+- 依赖 `requests` 与 Python 标准库的 `tkinter`；`tkinter` 缺失时需换带 Tcl/Tk 的 Python 官方安装包
+- 必须运行在有交互桌面的登录会话中，不支持 Windows 服务、纯后台 Session
+- 通知依赖 WinRT toast，锁死系统自带的 Windows PowerShell 5.1 路径；失败时回退为 `winsound` 蜂鸣，不会弹窗
+- API Key 用 DPAPI 加密，绑定当前 Windows 账户与本机；把 `config.json` 拷到别的机器或别的账户下无法解密，此时会回退成读明文 `key` 字段
+- 中转站若管理接口需要登录，条目 `extra` 里要同时填 `email` 和 `password`
+- SiliconFlow 官方已下线余额接口，无法接入；OpenCode Zen 与 MiniMax 的按量付费余额没有稳定的公开接口，只做套餐类查询
+- 价格表只内置了少量常见模型，未收录的模型在价格估算里显示为 0，需要自行在 `ui/model_panel.py` 的 `PRICE_TABLE` 里补
+- 轮询会按 `providers[]` 条目数开线程并发请求各家接口，条目多时留意各家的频率限制
+- 测试会创建并销毁多个 Tk 根窗口，在无图形环境的机器上无法运行
 
-### v2.2 (设置界面简化)
-
-- `refactor(ui)`:SettingsDialog 砍到 3 项设置(刷新间隔 / ¥ 临界 / % 警告)+ 主题切换;"添加 API Key" 拆成链接跳转独立 AddKeyDialog
-- `refactor(alert)`:删除 `warn_amount` / `warn_amount_yuan` / `critical_amount` / `critical_pct` / `cooldown_min` / `max_per_hour` 6 项 cfg key;_level 简化到 ¥ 临界 + % 警告
-- `refactor(aggregate)`:删除 `monthly_budget_usd` / `currency_rate_cny_per_usd` 2 项 cfg key + 整模块 `providers/aggregate.py`(只被测试引用)
-- `refactor(alert)`:全局节流 → per-provider 60min 冷却(硬编码)
-- `fix(ui)`:SettingsDialog 去掉 grab_set() 改为非模态,允许设置打开时主面板仍可拖动
-- `fix(ui)`:去掉交通灯 hover glyph(× − ⋯),只保留 cursor=hand2 表示可点击
-- `fix(ui)`:交通灯右移到右集群,黄绿红顺序;⚙ 简化为绿点设键;浅色交通灯残留深色框修复
-
-### v2.1 (最近 4 笔 commit)
-
-- `fix(panel)`:进度条 bar 绑 `<Configure>`,Tk 布局驱动,修首帧不可见 + resize 后不跟随
-- `chore(ui)`:引入 `ui/presets.py` 占位模块,为设置对话框重构做准备
-- `fix(alert)`:全局告警时间戳持久化,重启后 1 h 闸门不归零
-- `feat(alert)`:新增 `alert.max_per_hour` 全局告警间隔,跨 provider 一小时最多一次 toast
-
-### v2.0
-
-- 多 provider 统一面板 + 5 个一键预设
-- 金额/额度双视图 + 渐变色
-- 主面板 + 模型面板拖拽重排 + resize
-- v1 → v2 schema 自动迁移
+最后修改日期: 2026.9.29
