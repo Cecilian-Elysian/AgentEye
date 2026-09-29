@@ -873,8 +873,7 @@ class Panel:
         card._bg = bg
         top = tk.Frame(card, bg=bg)
         top.pack(fill="x", padx=8, pady=(6, 0))
-        prefix = "💰 " if is_amount else ""
-        name_lbl = tk.Label(top, text=prefix + name, font=(FONT, 9, "bold"),
+        name_lbl = tk.Label(top, text=name, font=(FONT, 9, "bold"),
                             fg=C["text"], bg=bg)
         name_lbl.pack(side="left")
         value_lbl = tk.Label(top, text="…", font=(FONT, 9),

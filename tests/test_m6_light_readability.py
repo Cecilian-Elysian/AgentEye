@@ -236,7 +236,7 @@ class TestMacHeaderLayout(unittest.TestCase):
                          f"右集群从左到右应为 [minimize, settings, close],实为 {kinds}")
 
     def test_no_standalone_settings_text_button(self):
-        """不再有独立 ⚙ 文本按钮,只有 3 个 traffic light dot。"""
+        """不再有独立的齿轮文本按钮,只有 3 个 traffic light dot。"""
         set_theme("dark", broadcast=False)
         mac = self._mac()
         self.assertFalse(hasattr(mac.header, "settings_btn"),
