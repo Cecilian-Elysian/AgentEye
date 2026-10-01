@@ -570,6 +570,40 @@ class TestSettingsWindowIsSingleton(unittest.TestCase):
         dlg.goto("add_key")  # 不应抛异常
         dlg.raise_()
 
+    def test_save_does_not_wipe_config(self):
+        """点「保存设置」不得清空 cfg(回归:P0 整份配置被写盘成 {})。
+
+        SettingsDialog 持有的是宿主那个 cfg 对象本身,它的 _save() 会把
+        on_save(cfg) 原样传回;宿主若照着做 cfg.clear() + update(同一个
+        对象) 就会把配置清空并落盘。历史上这个路径零测试。
+        """
+        cfg = self._cfg()
+        cfg["refresh_interval_sec"] = 60
+        cfg["alert"] = {"warn_pct": 30, "critical_amount_yuan": 5.0}
+        actions = self._actions(cfg)
+        dlg = self._open(actions)
+        dlg._save()
+        self.assertEqual(len(cfg.get("providers") or []), 1,
+                         "保存设置后 providers 不得被清空")
+        self.assertEqual(cfg["providers"][0]["name"], "DeepSeek")
+        self.assertEqual(cfg["providers"][0]["key"], "k1")
+        self.assertEqual(cfg["refresh_interval_sec"], 60)
+        self.assertIn("ui", cfg)
+
+    def test_save_writes_config_to_disk(self):
+        """保存设置后磁盘上仍有 providers,而不是被空模板覆盖。"""
+        import config as config_mod
+        import json
+        cfg = self._cfg()
+        actions = self._actions(cfg)
+        dlg = self._open(actions)
+        dlg._save()
+        self.assertTrue(config_mod.CONFIG_PATH.exists())
+        disk = json.loads(config_mod.CONFIG_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(len(disk.get("providers") or []), 1)
+        # 磁盘态只有 key_enc,没有明文 key
+        self.assertNotIn("key", disk["providers"][0])
+
 
 class TestMainWiring(unittest.TestCase):
     """main.py 接线源码断言(仿 TestM45Integration 模式)。"""

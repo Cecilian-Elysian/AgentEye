@@ -20,6 +20,7 @@ if ROOT not in sys.path:
 
 from ui.theme import (
     PALETTE, set_theme, on_theme_change, off_theme_change, PALETTES,
+    to_tk_color,
 )
 
 
@@ -72,11 +73,11 @@ class TestMacToplevelBase(unittest.TestCase):
 
         dlg = DemoDialog(self.root)
         self.assertTrue(dlg.winfo_exists())
-        try:
-            dlg._on_close()
-            self.assertFalse(dlg.winfo_exists())
-        except tk.TclError:
-            pass
+        # 不能把断言包在 try/except tk.TclError 里:_on_close 抛 TclError
+        # 时 assertFalse 会被跳过,测试照样绿。销毁后再取 widget 状态本身
+        # 就会 TclError,所以用 winfo_exists() 的返回值来判定。
+        dlg._on_close()
+        self.assertFalse(dlg.winfo_exists())
 
     def test_traffic_lights_have_three_kinds(self):
         from ui.mac_toplevel import MacToplevel
@@ -197,10 +198,21 @@ class TestSettingsDialogMacMode(unittest.TestCase):
         cfg = {"ui": {"theme": "dark"},
                "refresh_interval_sec": 60,
                "alert": {"warn_pct": 30, "critical_amount_yuan": 10.0}}
+        # 真正有意义的行为断言:先在浅色主题下构造,再切到深色并要求
+        # refresh_palette 把控件底色改过来。之前这里是 assertTrue(True),
+        # 刷新彻底坏掉(内部提前 return)也不会红。
+        set_theme("light", broadcast=False, persist=False)
         dlg = SettingsDialog(self.root, cfg)
         try:
+            def _norm(c):
+                return str(c).lstrip("#").upper()
+
+            self.assertEqual(_norm(dlg._holder.cget("bg")),
+                             _norm(to_tk_color(PALETTE.BG)))
+            set_theme("dark", broadcast=False, persist=False)
             dlg.refresh_palette()
-            self.assertTrue(True)
+            self.assertEqual(_norm(dlg._holder.cget("bg")),
+                             _norm(to_tk_color(PALETTE.BG)))
         finally:
             try:
                 dlg.destroy()
@@ -442,12 +454,96 @@ class TestEssentialBarChevron(unittest.TestCase):
 
 
 class TestPanelDragIndicatorColor(unittest.TestCase):
+    """拖拽指示线必须真的画得出来。
 
-    def test_drag_indicator_uses_blue(self):
-        src = open(os.path.join(ROOT, "ui", "panel.py"), encoding="utf-8").read()
-        self.assertIn("PALETTE.BLUE", src)
-        self.assertIn("_show_drag_indicator", src)
-        self.assertIn("_drag_active", src)
+    之前这里是 grep 源码字符串("PALETTE.BLUE" / "_show_drag_indicator"),
+    而 ui/panel.py:764 读 C["card_pressed"] 抛 KeyError —— 那几行字符串
+    正好住在会崩的函数体里,grep 断言是"因为有 bug 才绿"。现在真调一次。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from ui.panel import Panel
+        cls.root = tk.Tk()
+        cls.root.withdraw()
+
+        class _State:
+            results = []
+            paused = False
+            paused_providers = set()
+            fetching = False
+            poll_error = None
+            save_error = None
+            next_fetch = 0.0
+
+        cls.saved = []
+        cls.cfg = {"ui": {"width": 360, "height": 360}, "providers": [],
+                   "alert": {"warn_pct": 30, "critical_amount_yuan": 5.0}}
+        actions = {
+            "refresh_now": lambda: None,
+            "toggle_pause": lambda: None,
+            "test_notify": lambda: None,
+            "open_config": lambda: None,
+            "open_settings": lambda *a: None,
+            "quit": lambda: None,
+            "save_position": lambda *a: None,
+            "save_size": lambda *a: None,
+            "save_order": lambda o: cls.saved.append(list(o)),
+            "save_pin": lambda v: None,
+            "get_order": lambda: [],
+            "get": None,
+        }
+        cls.state = _State()
+        cls.panel = Panel(cls.root, cls.state, cls.cfg, actions)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.root.destroy()
+        except tk.TclError:
+            pass
+
+    def _rows(self, *names):
+        self.state.results = [
+            {"name": n, "kind": "deepseek", "level": "ok", "unit": "$",
+             "remaining": 5.0, "used": 1.0, "total": 6.0, "pct": None,
+             "detail": "d", "error": None, "unconfigured": False,
+             "paused": False, "updated_at": 1.0, "is_estimate": False}
+            for n in names
+        ]
+        self.panel._sig = None
+        self.panel._update()
+
+    class _Ev:
+        def __init__(self, y_root, widget=None):
+            self.y_root = y_root
+            self.x_root = 0
+            self.widget = widget
+
+    def test_drag_shows_indicator_without_raising(self):
+        """按下 → 垂直拖动超过阈值,指示线与按压高亮都要能画出来。"""
+        from ui import panel as panel_mod
+        self._rows("A", "B")
+        name = "A"
+        self.panel._drag_press(self._Ev(100), name)
+        # 超过 8px 阈值,会走到 _show_drag_indicator
+        self.panel._drag_motion(self._Ev(400), name)
+        d = self.panel._drag
+        self.assertTrue(d["active"], "超过阈值应激活拖拽")
+        self.assertIsNotNone(d.get("indicator"), "应画出指示线")
+        # 关键回归:C["card_pressed"] 必须存在
+        self.assertIn("card_pressed", panel_mod.C)
+        self.panel._drag_release(self._Ev(400), name)
+
+    def test_drag_release_commits_new_order(self):
+        self._rows("A", "B")
+        del self.saved[:]
+        name = "A"
+        self.panel._drag_press(self._Ev(100), name)
+        self.panel._drag_motion(self._Ev(10000), name)
+        self.panel._drag_release(self._Ev(10000), name)
+        self.assertTrue(self.saved, "_commit_drag 应调用 save_order")
+        self.assertEqual(sorted(self.saved[-1]), ["A", "B"])
 
 
 class TestM45Integration(unittest.TestCase):

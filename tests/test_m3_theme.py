@@ -116,7 +116,8 @@ class TestSetTheme(unittest.TestCase):
     def test_current_choice_persists_user_value(self):
         set_theme("auto", broadcast=False)
         self.assertEqual(current_choice(), "auto")
-        self.assertTrue(is_dark() or not is_dark())
+        # 关键断言:choice 记的是用户选的 "auto",不是解析后的 dark/light
+        self.assertNotIn(current_choice(), ("dark", "light"))
 
     def test_level_color_synced_after_set_theme(self):
         from ui.theme import LEVEL_OK, LEVEL_WARN

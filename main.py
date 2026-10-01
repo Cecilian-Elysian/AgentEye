@@ -161,8 +161,15 @@ def build_actions(root, cfg, state, stop, wake):
             _settings_win["dlg"] = None
 
         def _on_save(new_cfg):
-            cfg.clear()
-            cfg.update(new_cfg)
+            # 绝不能 cfg.clear() 后再 update(new_cfg):SettingsDialog 持有的
+            # 就是宿主这个 cfg 对象本身,它把同一个对象原样传回来,
+            # clear() 会把整份配置清空、update() 变成自更新空操作,
+            # 随后落盘成 {} —— 所有 provider 与密钥一次性丢失且无任何报错。
+            # 传进来的可能是宿主已就地改过的同一对象,也可能是对话框的
+            # 副本,两种都要能安全合并。
+            if new_cfg is not cfg:
+                cfg.clear()
+                cfg.update(new_cfg)
             if _save():
                 _apply_settings_live()
 

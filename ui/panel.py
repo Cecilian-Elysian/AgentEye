@@ -30,6 +30,7 @@ C = {
     "error": to_tk_color(PALETTE.ERROR),
     "off": to_tk_color(PALETTE.OFF),
     "card_amount": to_tk_color(PALETTE.CARD_AMOUNT),
+    "card_pressed": to_tk_color(PALETTE.CARD_PRESSED),
 }
 
 LEVEL_COLOR = {k: C[k] for k in ("ok", "warn", "critical", "error")}
@@ -67,6 +68,7 @@ def _refresh_C():
     C["error"] = to_tk_color(PALETTE.ERROR)
     C["off"] = to_tk_color(PALETTE.OFF)
     C["card_amount"] = to_tk_color(PALETTE.CARD_AMOUNT)
+    C["card_pressed"] = to_tk_color(PALETTE.CARD_PRESSED)
     LEVEL_COLOR["ok"] = C["ok"]
     LEVEL_COLOR["warn"] = C["warn"]
     LEVEL_COLOR["critical"] = C["critical"]

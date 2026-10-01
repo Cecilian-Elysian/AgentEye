@@ -13,6 +13,12 @@ import config as config_mod
 def _make_root():
     root = tk.Tk()
     root.geometry("360x400+200+200")
+    # MacWindow 会设 -topmost + overrideredirect,测试期间就会在用户桌面
+    # 上弹出真实的无边框置顶窗口并抢焦点。
+    # 用 alpha=0 而不是 withdraw():withdraw 不 mapped,子控件拿不到几何,
+    # 依赖 winfo_x/place_info 的用例会直接失效。alpha=0 窗口正常 map,
+    # 几何、事件、Configure 全部照常,只是完全看不见。
+    root.attributes("-alpha", 0.0)
     return root
 
 
@@ -315,8 +321,7 @@ class TestSettingsDialogNonModal(unittest.TestCase):
     """SettingsDialog 必须非模态,不能 grab_set,主窗口拖动才不会被吞。"""
 
     def setUp(self):
-        self.root = tk.Tk()
-        self.root.geometry("360x400+200+200")
+        self.root = _make_root()
 
     def tearDown(self):
         try:

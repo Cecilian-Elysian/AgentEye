@@ -80,6 +80,9 @@ class AfterReorderCallback(unittest.TestCase):
         p = mp.ModelPanel(self._root, "Test", ["m1", "m2"],
                           on_reorder=lambda o: None)
         p._commit_model_drag("m1", 1)
+        # 断言:没有 on_after_reorder 回调时,顺序仍应被正确改写
+        # (之前这里零断言,拖错了也没人知道)
+        self.assertEqual(list(p.models), ["m2", "m1"])
 
 
 class EmptyFilterRender(unittest.TestCase):

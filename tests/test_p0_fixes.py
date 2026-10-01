@@ -1,4 +1,4 @@
-"""P0/P1 修复的回归测试。
+﻿"""P0/P1 修复的回归测试。
 
 覆盖:
 - config:损坏文件留证不覆盖、schema_version>2 报错、v1 迁移先备份、
@@ -11,6 +11,7 @@
 """
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -222,6 +223,46 @@ class TestMinimaxOrdering(unittest.TestCase):
                       "headline 应跟着有百分比的模型走")
 
 
+class TestGenericCachesModels(unittest.TestCase):
+    """generic.fetch 必须把模型列表写进 cache。
+
+    这里必须用 assert_called:generic.py 里那段是 try/except 包着的,
+    只断言返回值的话,写缓存的代码整段坏掉测试照样绿(历史上就因为
+    一个 NameError 被吞掉,导致模型缓存从来没被写过)。
+    """
+
+    def _billing(self):
+        m = mock.Mock()
+        m.status_code = 200
+        m.json.return_value = {"total_granted": 100.0, "total_used": 30.0,
+                               "total_available": 70.0}
+        return m
+
+    def _models(self):
+        m = mock.Mock()
+        m.status_code = 200
+        m.json.return_value = {"data": [{"id": "gpt-4o"}, {"id": "claude"}]}
+        return m
+
+    def test_set_models_is_called_with_real_base_and_key(self):
+        import cache as cache_mod
+        with mock.patch.object(generic_mod.requests, "get",
+                               side_effect=[self._billing(), self._models()]), \
+             mock.patch.object(cache_mod, "set_models") as sm:
+            res = generic_mod.fetch({"base_url": "https://h", "key": "sk-x"})
+        self.assertEqual(res["models"], ["gpt-4o", "claude"])
+        sm.assert_called_once_with("https://h", "sk-x", ["gpt-4o", "claude"])
+
+    def test_models_land_in_real_cache_file(self):
+        """不打桩 cache,验证真的落到 models.json 里。"""
+        import cache as cache_mod
+        with mock.patch.object(generic_mod.requests, "get",
+                               side_effect=[self._billing(), self._models()]):
+            generic_mod.fetch({"base_url": "https://h", "key": "sk-x"})
+        got = cache_mod.get_models("https://h", "sk-x")
+        self.assertEqual(sorted(got), ["claude", "gpt-4o"])
+
+
 class TestGenericBillingField(unittest.TestCase):
     def test_total_used_legacy_name(self):
         res = generic_mod._parse_openai_billing(
@@ -234,6 +275,108 @@ class TestGenericBillingField(unittest.TestCase):
             {"total_granted": 100.0, "total_used_amount": 30.0,
              "total_available": 70.0})
         self.assertEqual(res["used"], 30.0)
+
+
+class TestPanelColorDictConsistency(unittest.TestCase):
+    """C 字典与 _refresh_C 必须覆盖 panel.py 里所有 C["..."] 读取。
+
+    历史上有 C["card_pressed"] 这么一条:读取点存在、palette 也有
+    CARD_PRESSED,但中间那层投影漏了,拖拽一按就 KeyError。这里把
+    "读取点 ⊆ 字典" 和 "字典 == 字面量 == _refresh_C" 两条都钉死。
+    """
+
+    def test_every_read_key_exists_in_c(self):
+        from ui import panel as panel_mod
+        src = (Path(panel_mod.__file__).read_text(encoding="utf-8"))
+        used = set(re.findall(r'\bC\["(\w+)"\]', src))
+        missing = sorted(used - set(panel_mod.C))
+        self.assertEqual(missing, [],
+                         f"panel.py 读取了 C 里不存在的键:{missing}")
+
+    def test_c_dict_has_no_hardcoded_hex(self):
+        """C 的每个值都必须来自 PALETTE,不许写死 hex(AGENTS.md 规则 3)。
+
+        只做"键存在"检查不够:把某一项改成硬编码色值仍然能通过,
+        但那一项从此不随主题变化,浅色主题下会残留深色框。
+        """
+        from ui import panel as panel_mod
+        src = (Path(panel_mod.__file__).read_text(encoding="utf-8"))
+        m = re.search(r"^C = \{(.*?)^\}", src, re.S | re.M)
+        self.assertIsNotNone(m, "找不到 C 字典字面量")
+        body = m.group(1)
+        # 注意值的引号:"key": "#RRGGBB",冒号与 # 之间还隔一个 "
+        bad = re.findall(r'"(\w+)":\s*"(#[0-9A-Fa-f]{6})"', body)
+        self.assertEqual(bad, [], f"C 里有硬编码颜色:{bad}")
+
+        keys = set(re.findall(r'"(\w+)":', body))
+        from_src = set(re.findall(r'C\["(\w+)"\]\s*=\s*to_tk', src))
+        self.assertEqual(sorted(keys - from_src), [],
+                         "C 里的键必须在 _refresh_C 里也有 to_tk_color 赋值")
+
+    def test_refresh_c_writes_every_key(self):
+        from ui import panel as panel_mod
+        src = (Path(panel_mod.__file__).read_text(encoding="utf-8"))
+        m = re.search(r"def _refresh_C\(\):.*?(?=\ndef |\nclass )", src, re.S)
+        self.assertIsNotNone(m, "找不到 _refresh_C")
+        assigned = set(re.findall(r'C\["(\w+)"\]\s*=', m.group(0)))
+        self.assertEqual(
+            sorted(set(panel_mod.C) - assigned), [],
+            "C 的每个键都必须在 _refresh_C 里被重新赋值,否则切主题后残留旧色")
+
+
+    def test_palette_has_every_field_c_uses(self):
+        from ui import panel as panel_mod
+        from ui.theme import DarkPalette
+        src = (Path(panel_mod.__file__).read_text(encoding="utf-8"))
+        # 取右值真正引用的 palette 字段:C["dim"] = to_tk_color_blended(
+        # PALETTE.TEXT_DIM) 用的是 TEXT_DIM 而不是 DIM,所以不能拿左键名去比
+        used = set(re.findall(
+            r'C\["\w+"\]\s*=\s*to_tk_color(?:_blended)?\(\s*PALETTE\.(\w+)',
+            src))
+        # PALETTE 是 _PaletteProxy 代理,dir() 看不到动态属性;
+        # DarkPalette 是普通类(非 dataclass),字段都在 __dict__ 里
+        have = {n for n in vars(DarkPalette) if n.isupper()}
+        absent = sorted(used - have)
+        self.assertEqual(absent, [], f"PALETTE 缺少 C 需要的字段:{absent}")
+        self.assertGreaterEqual(len(used), 10,
+                                "正则没匹配够,测试本身可能失效")
+
+
+class TestActionWiringCompleteness(unittest.TestCase):
+    """ui/panel.py 里所有 actions.get("X", lambda: ...) 的 X 必须真的被接线。
+
+    AGENTS.md 规则 4 要求维护 action 清单来防 .get(..., lambda: None)
+    静默吞掉未接线入口,但历史清单自己漏了 toggle_mode,导致右键菜单里
+    「切换为单行模式」在生产环境是个恒 no-op。这里改成从源码里把兜底
+    键抓出来,和 build_actions() 的真实返回值对撞。
+    """
+
+    # 已知未接线项(本轮只改文档不改代码,见 README 已知问题)。
+    KNOWN_MISSING = {"toggle_mode"}
+
+    def test_fallback_keys_are_wired(self):
+        import threading
+        import tkinter as tk
+        import main as main_mod
+        from ui import panel as panel_mod
+        src = (Path(panel_mod.__file__).read_text(encoding="utf-8"))
+        used = set(re.findall(r'actions\.get\("(\w+)",\s*lambda', src))
+        self.assertTrue(used, "正则没匹配到任何兜底 action,测试本身失效")
+
+        root = tk.Tk()
+        self.addCleanup(root.destroy)
+        # 不给 skip 兜底:Tk 建不起来时整个套件本来就跑不了,
+        # 在这里 skip 只会把"守卫没生效"伪装成"通过"
+        actions = main_mod.build_actions(root, {}, main_mod.State(),
+                                         threading.Event(),
+                                         threading.Event())
+        wired = set(actions)
+        self.assertTrue(wired, "build_actions 返回空字典,测试本身失效")
+
+        missing = sorted(used - wired - self.KNOWN_MISSING)
+        self.assertEqual(
+            missing, [],
+            f"panel.py 里这些 action 永远拿到兜底 no-op:{missing}")
 
 
 class TestThemeListenerTeardown(unittest.TestCase):
@@ -267,3 +410,4 @@ class TestThemeListenerTeardown(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

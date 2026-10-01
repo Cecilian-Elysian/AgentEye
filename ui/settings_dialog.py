@@ -132,6 +132,11 @@ class SettingsDialog(MacToplevel):
 
         self.goto(initial_view)
 
+        # 本模块的 BG/FG 等是 import 时求值的快照(见 _refresh_settings_palette)。
+        # 用户在浅色主题下打开设置时,构造期用的还是深色快照,首帧会闪一排
+        # 深色框。构造完主动刷一次,与 Panel.__init__ 末尾的做法一致。
+        self.refresh_palette()
+
     # ---------- 公共 ----------
 
     def goto(self, view=None):
@@ -206,7 +211,10 @@ class SettingsDialog(MacToplevel):
         表单模式 AddKeyForm 自己注册了 on_theme_change,自管配色。
         """
         if root is None:
-            root = self._body_inner
+            # 从 _holder 起步而不是 _body_inner:_holder 是 _body_inner 的
+            # 父容器,从 body_inner 起步会把它自己漏掉,浅色主题下外圈留一圈
+            # import 时的深色快照。
+            root = getattr(self, "_holder", None) or self._body_inner
             if root is None:
                 return
         if root is getattr(self, "_center", None):

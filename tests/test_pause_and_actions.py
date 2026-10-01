@@ -35,8 +35,14 @@ class TestFetchAllSkip(unittest.TestCase):
         self.calls = []
 
         def _spy(kind, entry, cfg):
+            # 只记账,不调真实适配器:调了就会向 api.deepseek.com 发真实
+            # HTTPS 请求(带一个假 Bearer),断网时每个用例拖 12s。
+            # 这几个用例断言的是"哪些条目被调过"和 paused 标记,不需要
+            # 真的网络往返;字段清单用生产代码的 _blank_result 保证一致。
             self.calls.append(entry.get("name"))
-            return dict(self._orig_one(kind, entry, cfg), name=entry.get("name"))
+            res = providers._blank_result(kind, entry)
+            res.update({"level": "ok", "remaining": 1.0})
+            return res
 
         providers._one = _spy
 

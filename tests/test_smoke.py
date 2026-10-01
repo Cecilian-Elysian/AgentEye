@@ -97,6 +97,9 @@ class TestM1WindowShell(IsolatedConfigMixin, unittest.TestCase):
         super().setUp()
         self.root = tk.Tk()
         self.root.geometry("360x260+200+200")
+        # MacWindow 会设 -topmost + overrideredirect。这里必须保持 mapped
+        # (本类要验槽位几何),所以用 alpha=0 隐形,而不是 withdraw()。
+        self.root.attributes("-alpha", 0.0)
 
     def tearDown(self):
         try:

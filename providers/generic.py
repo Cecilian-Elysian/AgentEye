@@ -1,5 +1,7 @@
 """通用 OpenAI 兼容 provider 适配器 + 模型探测。"""
 
+import sys
+
 import requests
 
 TIMEOUT = 12
@@ -114,11 +116,12 @@ def fetch(entry):
         parsed["models_count"] = len(parsed["models"])
         # 同步进模型缓存:probe_models / ModelPanel 只认缓存,
         # 不落库的话每次都要现场拉 /v1/models。
+        # 注意变量名是 base(上面刚算出来的),不是 base_url。
         try:
             import cache
-            cache.set_models(base_url, key, parsed["models"])
-        except Exception:
-            pass
+            cache.set_models(base, key, parsed["models"])
+        except Exception as e:      # 缓存写失败不该拖垮额度展示
+            sys.stderr.write(f"模型缓存写入失败:{e.__class__.__name__}: {e}\n")
 
     parsed.setdefault("detail", "")
     parsed["detail"] = f"[{parsed['quota_endpoint']}] {parsed['detail']}".strip()

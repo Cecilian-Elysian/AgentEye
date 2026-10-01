@@ -248,6 +248,8 @@ class TestEssentialBarWidget(unittest.TestCase):
                            on_expand=lambda: None)
         bar.destroy()
         bar.destroy()
+        # 断言:反复销毁后底层 Frame 确实不在了,而不是"没抛异常"就算过
+        self.assertFalse(bar.frame.winfo_exists())
 
 
 if __name__ == "__main__":
