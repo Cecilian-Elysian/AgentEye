@@ -54,10 +54,14 @@ def _make_panel(root):
     return p, toplevel
 
 
+# pct 是**剩余**百分比 80,条形画的是**已消耗**占比 (100-80)/100 = 0.2。
+# 长度和颜色必须同源(都来自 _usage_ratio),否则会出现"30% 宽的橙条"
+# 这种长度按剩余、取色按消耗的自相矛盾显示。
 _PCT_RESULT = {"name": "Z", "type": "zhipu", "unit": "%", "level": "ok",
                "remaining": None, "used": None, "total": None,
                "pct": 80, "detail": "5h 80%", "error": None,
                "updated_at": 1.0}
+_PCT_CONSUMED = 0.2
 
 
 class BarFirstFrame(unittest.TestCase):
@@ -90,7 +94,7 @@ class BarFirstFrame(unittest.TestCase):
             self.assertGreaterEqual(real_w, 10)
             coords = bar.coords(w["rect"])
             x2 = coords[2]
-            expected = int(real_w * 0.8)
+            expected = int(real_w * _PCT_CONSUMED)
             self.assertEqual(x2, expected,
                              f"bar x2={x2}, expected {expected} (real_w={real_w})")
         finally:
@@ -117,15 +121,18 @@ class BarFirstFrame(unittest.TestCase):
 
             ev = type("E", (), {"width": 600})()
             panel_mod._on_bar_configure(ev, bar, rect, w)
-            self.assertEqual(bar.coords(rect)[2], 480)
+            self.assertEqual(bar.coords(rect)[2],
+                             int(600 * _PCT_CONSUMED))
 
             ev.width = 300
             panel_mod._on_bar_configure(ev, bar, rect, w)
-            self.assertEqual(bar.coords(rect)[2], 240)
+            self.assertEqual(bar.coords(rect)[2],
+                             int(300 * _PCT_CONSUMED))
 
             ev.width = 0
             panel_mod._on_bar_configure(ev, bar, rect, w)
-            self.assertEqual(bar.coords(rect)[2], 240)
+            self.assertEqual(bar.coords(rect)[2],
+                             int(300 * _PCT_CONSUMED))
         finally:
             try:
                 toplevel.destroy()
@@ -155,9 +162,10 @@ class BarFirstFrame(unittest.TestCase):
             post = bar.coords(rect)
             real_w = bar.winfo_width()
             self.assertGreaterEqual(real_w, 10)
-            self.assertEqual(post[2], int(real_w * 0.8),
+            self.assertEqual(post[2], int(real_w * _PCT_CONSUMED),
                              f"布局完成后 Configure handler 应把 rect 画到 "
-                             f"int({real_w} * 0.8) = {int(real_w * 0.8)},实际 {post[2]}")
+                             f"int({real_w} * {_PCT_CONSUMED}) = "
+                             f"{int(real_w * _PCT_CONSUMED)},实际 {post[2]}")
         finally:
             try:
                 toplevel.destroy()

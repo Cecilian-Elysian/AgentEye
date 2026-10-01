@@ -1157,15 +1157,18 @@ class Panel:
             detail = f"更新于 {time.strftime('%H:%M:%S', time.localtime(r.get('updated_at', 0)))}"
         _set_detail_with_tags(widgets["detail"], detail, color)
 
-        pct = r.get("pct")
-        frac = None
-        if pct is not None:
-            frac = max(0.0, min(1.0, float(pct) / 100.0))
         bar = widgets["bar"]
         rect = widgets["rect"]
         if bar is None or rect is None:
             return
-        widgets["_bar_frac"] = frac if frac is not None else 1.0
+        # 条的长度与颜色必须来自同一个量。之前长度用 pct(=剩余),
+        # 颜色用 ratio(=已消耗),于是剩 30% 的账号会画成一条 30% 宽的
+        # 橙色条(按"已消耗 70%"取色),且与折叠条带画的 70% 互相矛盾。
+        # 现在统一用"已消耗占比":越长越红,和颜色、与条带一致。
+        # ratio 为 None(未配置/出错/拿不到数)时不画满格——满格灰条会被
+        # 误读成"额度充足"。
+        frac = 0.0 if ratio_val is None else max(0.0, min(1.0, ratio_val))
+        widgets["_bar_frac"] = frac
         widgets["_bar_color"] = color
         try:
             width = bar.winfo_width()

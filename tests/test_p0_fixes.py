@@ -662,6 +662,201 @@ class TestOpencodeGoUrlFallback(unittest.TestCase):
         self.assertIn("key 无效", res["error"])
 
 
+class TestAlertCooldownNotInherited(unittest.TestCase):
+    """删除/改名后,新条目不该继承旧条目的 60 分钟告警冷却。"""
+
+    def _poller(self):
+        import main as main_mod
+        p = main_mod.Poller({}, main_mod.State(),
+                            threading.Event(), threading.Event())
+        p.notified = {"DeepSeek": ("critical", time.time() - 5),
+                      "别的": ("warn", time.time() - 5)}
+        return p
+
+    def test_forget_drops_only_named(self):
+        p = self._poller()
+        p.forget_alert_state("DeepSeek")
+        self.assertNotIn("DeepSeek", p.notified)
+        self.assertIn("别的", p.notified, "不该误伤别的 provider")
+
+    def test_deleted_provider_alerts_immediately_after_recreate(self):
+        """真实场景:key 填错了 → 删掉 → 同名重加 → 立刻 critical。"""
+        import threading as th
+        import main as main_mod
+        poller = self._poller()
+        cfg = {"schema_version": 2, "refresh_interval_sec": 30,
+               "alert": {"enable": True, "warn_pct": 30,
+                         "critical_amount_yuan": 5.0},
+               "ui": {}, "providers": [
+                   {"id": "p1", "kind": "deepseek", "name": "DeepSeek",
+                    "key": "sk-x", "base_url": "https://h", "extra": {}}]}
+        root = tk_root()
+        try:
+            actions = main_mod.build_actions(root, cfg, main_mod.State(),
+                                             th.Event(), th.Event(),
+                                             poller=poller)
+            actions["delete_provider_by_id"]("p1")
+            self.assertNotIn("DeepSeek", poller.notified,
+                             "删除后必须清掉冷却,否则同名重建会继承它")
+
+            # 同名重建,轮询一轮报 critical
+            cfg["providers"].append(
+                {"id": "p2", "kind": "deepseek", "name": "DeepSeek",
+                 "key": "sk-y", "base_url": "https://h", "extra": {}})
+            poller.cfg = cfg
+            poller.state.results = []
+            with mock.patch.object(main_mod, "notify") as notify_mod:
+                poller._fire_alerts([{"name": "DeepSeek", "level": "critical"}])
+            called = getattr(notify_mod, "alert_many", None)
+            self.assertIsNotNone(called, "notify 被 mock 了才算验证到弹窗路径")
+            called.assert_called()
+        finally:
+            root.destroy()
+
+    def test_rename_forgets_old_name(self):
+        import threading as th
+        import main as main_mod
+        poller = self._poller()
+        cfg = {"schema_version": 2, "refresh_interval_sec": 30,
+               "alert": {"enable": True, "warn_pct": 30,
+                         "critical_amount_yuan": 5.0},
+               "ui": {}, "providers": [
+                   {"id": "p1", "kind": "deepseek", "name": "DeepSeek",
+                    "key": "sk-x", "base_url": "https://h", "extra": {}}]}
+        root = tk_root()
+        try:
+            actions = main_mod.build_actions(root, cfg, main_mod.State(),
+                                             th.Event(), th.Event(),
+                                             poller=poller)
+            actions["update_provider"]("p1", {"name": "改名后", "key": "sk-y",
+                                              "base_url": "https://h"})
+            self.assertNotIn("DeepSeek", poller.notified)
+        finally:
+            root.destroy()
+
+
+def tk_root():
+    import tkinter as tk
+    r = tk.Tk()
+    r.withdraw()
+    r.attributes("-alpha", 0.0)
+    return r
+
+
+class TestBarMatchesColor(unittest.TestCase):
+    """进度条长度与颜色必须同源,都表示"已消耗占比"。
+
+    旧实现:长度 = pct/100(剩余),颜色 = _usage_ratio(已消耗)。
+    剩 30% 的账号画成"30% 宽的橙条",而折叠条带又画 70% 宽,
+    同一份数据在两处互相矛盾。
+    """
+
+    def test_length_equals_color_ratio(self):
+        from ui import panel as panel_mod
+        r = {"name": "Z", "unit": "%", "pct": 30.0, "level": "warn",
+             "remaining": None, "used": None, "total": None}
+        ratio = panel_mod._usage_ratio(r)
+        self.assertAlmostEqual(ratio, 0.7, places=6,
+                               msg="剩余 30% = 已消耗 70%")
+        # _usage_color 与 bar 长度用的是同一个 ratio,所以同一条一定自洽
+        color = panel_mod._usage_color(ratio)
+        self.assertNotEqual(color, panel_mod.C["ok"],
+                            "消耗 70% 不该是绿色")
+
+    def test_paint_row_uses_ratio_for_frac(self):
+        import tkinter as tk
+        from ui import panel as panel_mod
+        root = tk.Tk()
+        self.addCleanup(root.destroy)
+        root.withdraw()
+        top = tk.Toplevel(root)
+
+        class _S:
+            results = []
+            paused = False
+            paused_providers = set()
+            fetching = False
+            poll_error = None
+            save_error = None
+            next_fetch = 0.0
+
+        state = _S()
+        state.results = [{"name": "Z", "type": "zhipu", "unit": "%",
+                          "level": "ok", "remaining": None, "used": None,
+                          "total": None, "pct": 80, "detail": "d",
+                          "error": None, "updated_at": 1.0}]
+        actions = {"refresh_now": lambda: None, "toggle_pause": lambda: None,
+                   "test_notify": lambda: None, "quit": lambda: None,
+                   "save_position": lambda *a: None,
+                   "save_size": lambda *a: None,
+                   "save_order": lambda *a: None,
+                   "save_pin": lambda *a: None, "get_order": lambda: [],
+                   "open_config": lambda: None,
+                   "open_settings": lambda: None,
+                   "add_key": lambda: None,
+                   "delete_provider": lambda n: None,
+                   "edit_provider": lambda n: None,
+                   "pause_provider": lambda n: None,
+                   "probe_models": lambda n: None,
+                   "probe_model": lambda *a, **k: (False, 0.0, ""),
+                   "save_model_order": lambda *a: None}
+        p = panel_mod.Panel(top, state, {"ui": {}, "providers": [],
+                                         "alert": {}}, actions)
+        p._update()
+        widgets = p._rows["Z"]
+        p._paint_row(widgets, state.results[0])
+        # pct=80 剩余 → 已消耗 0.2
+        self.assertAlmostEqual(widgets["_bar_frac"], 0.2, places=6)
+        self.assertEqual(widgets["_bar_frac"],
+                         panel_mod._usage_ratio(state.results[0]))
+
+    def test_unknown_ratio_draws_empty_bar_not_full(self):
+        """出错/未配置的行不该画出误导性的满格条。"""
+        import tkinter as tk
+        from ui import panel as panel_mod
+        root = tk.Tk()
+        self.addCleanup(root.destroy)
+        root.withdraw()
+        top = tk.Toplevel(root)
+
+        class _S:
+            results = []
+            paused = False
+            paused_providers = set()
+            fetching = False
+            poll_error = None
+            save_error = None
+            next_fetch = 0.0
+
+        state = _S()
+        state.results = [{"name": "E", "type": "deepseek", "unit": "¥",
+                          "level": "error", "remaining": None, "used": None,
+                          "total": None, "pct": None, "detail": "boom",
+                          "error": "HTTP 500", "updated_at": 1.0}]
+        actions = {"refresh_now": lambda: None, "toggle_pause": lambda: None,
+                   "test_notify": lambda: None, "quit": lambda: None,
+                   "save_position": lambda *a: None,
+                   "save_size": lambda *a: None,
+                   "save_order": lambda *a: None,
+                   "save_pin": lambda *a: None, "get_order": lambda: [],
+                   "open_config": lambda: None,
+                   "open_settings": lambda: None,
+                   "add_key": lambda: None,
+                   "delete_provider": lambda n: None,
+                   "edit_provider": lambda n: None,
+                   "pause_provider": lambda n: None,
+                   "probe_models": lambda n: None,
+                   "probe_model": lambda *a, **k: (False, 0.0, ""),
+                   "save_model_order": lambda *a: None}
+        p = panel_mod.Panel(top, state, {"ui": {}, "providers": [],
+                                         "alert": {}}, actions)
+        p._update()
+        widgets = p._rows["E"]
+        # 出错/未配置的行根本不给画进度条,更不会画出误导性的满格灰条
+        self.assertIsNone(widgets["bar"])
+        p._paint_row(widgets, state.results[0])   # 不应抛异常
+
+
 class TestCacheConcurrentWrites(unittest.TestCase):
     """models.json 的读-改-写必须串行,且临时名唯一。
 
@@ -854,6 +1049,7 @@ class TestThemeListenerTeardown(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
 

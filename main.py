@@ -86,6 +86,22 @@ class Poller(threading.Thread):
         self.state.last_fetch = time.time()
         self._fire_alerts(results)
 
+    def forget_alert_state(self, *names):
+        """丢弃指定 provider 的告警冷却(删除/改名时调用)。
+
+        不清理的话,"key 填错了,删掉重加"这种最常见的工作流会让新条目
+        继承被删账号的 60 分钟冷却:真告急被静默,界面上看不出任何原因。
+        """
+        changed = False
+        for n in names:
+            if self.notified.pop(n, None) is not None:
+                changed = True
+        if changed:
+            try:
+                cache_mod.save_alert_state(self.notified)
+            except Exception:
+                pass
+
     def _fire_alerts(self, results):
         alert_cfg = self.cfg.get("alert") or {}
         if not alert_cfg.get("enable", True):
@@ -120,7 +136,7 @@ def _infer_kind_from_dialog(entry):
     return r["kind"]
 
 
-def build_actions(root, cfg, state, stop, wake):
+def build_actions(root, cfg, state, stop, wake, poller=None):
     actions = {}
 
     def refresh_now():
@@ -288,12 +304,17 @@ def build_actions(root, cfg, state, stop, wake):
         """按 id 更新 provider 的 name/key/base_url(kind 不变)。"""
         for p in cfg.get("providers") or []:
             if p.get("id") == pid:
+                old_name = p.get("name")
                 p["name"] = (entry.get("name") or "").strip() \
                     or p.get("name") or "未命名"
                 p["key"] = entry.get("key") or ""
                 p["base_url"] = entry.get("base_url") or ""
-                _save()
-                wake.set()
+                if _save():
+                    # 改名后旧名字的冷却条目是孤儿,会一直留在内存和
+                    # alert_state.json 里(每次改名 +1 键,单调增长)
+                    if poller is not None and p["name"] != old_name:
+                        poller.forget_alert_state(old_name)
+                    wake.set()
                 return
 
     def delete_provider_by_id(pid):
@@ -320,6 +341,8 @@ def build_actions(root, cfg, state, stop, wake):
             cache_mod.log_provider_deleted(name, base_url=base_url)
         except Exception:
             pass
+        if poller is not None:
+            poller.forget_alert_state(name)
         try:
             import notify as notify_mod
             notify_mod.alert("AgentEye", f"已删除:{name}")
@@ -455,7 +478,7 @@ def main():
     import tkinter as tk
 
     root = tk.Tk()
-    actions = build_actions(root, cfg, state, stop, wake)
+    actions = build_actions(root, cfg, state, stop, wake, poller=poller)
     mac = MacWindow(root, cfg, actions)
 
     initial_theme = (cfg.get("ui") or {}).get("theme") or "auto"
