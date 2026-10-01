@@ -15,6 +15,7 @@ import re
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -661,6 +662,95 @@ class TestOpencodeGoUrlFallback(unittest.TestCase):
         self.assertIn("key 无效", res["error"])
 
 
+class TestCacheConcurrentWrites(unittest.TestCase):
+    """models.json 的读-改-写必须串行,且临时名唯一。
+
+    旧实现用固定的 <name>.tmp:两个写者(轮询 worker 的 set_models 与
+    主线程的 save_model_order)先后 write_text("w") 会互相截断,
+    os.replace 装上混合字节的 JSON,再被 _load_json 当损坏返回 {},
+    于是**所有** provider 的模型缓存一起消失。
+    """
+
+    def _concurrent_set(self, n=12):
+        import cache as cache_mod
+        errs = []
+
+        def w(i):
+            try:
+                cache_mod.set_models(f"https://h{i}", f"sk-{i}", [f"m{i}"])
+            except Exception as e:      # noqa: BLE001
+                errs.append(e)
+
+        ts = [threading.Thread(target=w, args=(i,)) for i in range(n)]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join(20)
+        self.assertEqual(errs, [], f"并发写抛异常:{errs}")
+
+    def test_all_concurrent_writers_survive(self):
+        import cache as cache_mod
+        self._concurrent_set()
+        for i in range(12):
+            got = cache_mod.get_models(f"https://h{i}", f"sk-{i}")
+            self.assertEqual(got, [f"m{i}"],
+                             f"第 {i} 条被写丢了(models.json 被打坏)")
+
+    def test_file_stays_valid_json(self):
+        import cache as cache_mod
+        self._concurrent_set()
+        raw = cache_mod.MODELS_CACHE.read_text(encoding="utf-8")
+        data = json.loads(raw)      # 解析失败说明写坏了
+        self.assertEqual(len(data), 12)
+
+    def test_no_tmp_files_left_behind(self):
+        import cache as cache_mod
+        self._concurrent_set()
+        leftovers = list(cache_mod.CACHE_DIR.glob("*.tmp"))
+        self.assertEqual(leftovers, [], f"残留临时文件:{leftovers}")
+
+    def test_set_models_preserves_user_order(self):
+        """重新拉模型不能把用户排好的顺序冲掉(与并发写同时发生)。"""
+        import cache as cache_mod
+        cache_mod.set_models("https://h", "sk-1", ["a", "b", "c"])
+        cache_mod.save_model_order("https://h", "sk-1", ["c", "a", "b"])
+        cache_mod.set_models("https://h", "sk-1", ["a", "b", "c", "d"])
+        self.assertEqual(cache_mod.get_models("https://h", "sk-1"),
+                         ["c", "a", "b", "d"])
+
+    def test_malformed_cache_is_ignored_not_raised(self):
+        import cache as cache_mod
+        cache_mod.set_models("https://h", "sk-1", ["a"])
+        raw = json.loads(cache_mod.MODELS_CACHE.read_text(encoding="utf-8"))
+        key = cache_mod._hash("https://h", "sk-1")
+        raw[key] = {"models": "not-a-list", "fetched_at": "2026-01-01"}
+        cache_mod._save_json(cache_mod.MODELS_CACHE, raw)
+        self.assertIsNone(cache_mod.get_models("https://h", "sk-1"))
+
+
+class TestProbeLogTrimmed(unittest.TestCase):
+    def test_log_is_capped(self):
+        import cache as cache_mod
+        for i in range(cache_mod.PROBE_LOG_MAX_LINES + 50):
+            cache_mod.log_probe("P", f"m{i}", True, 1.0)
+        lines = cache_mod.PROBE_LOG.read_text(encoding="utf-8").splitlines()
+        self.assertLessEqual(len(lines), cache_mod.PROBE_LOG_MAX_LINES)
+        # 保留的是最近的
+        last = json.loads(lines[-1])
+        self.assertEqual(last["model"],
+                         f"m{cache_mod.PROBE_LOG_MAX_LINES + 49}")
+
+
+class TestAlertStateClockSkew(unittest.TestCase):
+    def test_future_timestamp_is_dropped(self):
+        """未来时间戳会让冷却判定恒真,该 provider 被永久静默。"""
+        import cache as cache_mod
+        cache_mod.save_alert_state({"A": ["critical", time.time() + 86400]})
+        self.assertEqual(cache_mod.load_alert_state(), {})
+        cache_mod.save_alert_state({"A": ["critical", time.time() - 10]})
+        self.assertIn("A", cache_mod.load_alert_state())
+
+
 class TestShutdownDoesNotLinger(unittest.TestCase):
     """关窗后进程不该在后台 invisible 挂两分多钟。
 
@@ -764,5 +854,6 @@ class TestThemeListenerTeardown(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

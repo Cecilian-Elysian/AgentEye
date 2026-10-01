@@ -6,6 +6,8 @@
 import hashlib
 import json
 import os
+import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -13,6 +15,13 @@ CACHE_DIR = Path.home() / ".agenteye" / "cache"
 MODELS_CACHE = CACHE_DIR / "models.json"
 PROBE_LOG = CACHE_DIR / "probe.jsonl"
 ALERT_STATE = CACHE_DIR / "alert_state.json"
+
+# 读-改-写必须串行。set_models 跑在轮询的 worker 线程里,
+# save_model_order / remove_provider_entries 跑在 Tk 主线程里,
+# 没有锁时两边的 write_text 会互相截断,os.replace 还会吃掉对方的 tmp,
+# 结果是整个 models.json 变成截断的 JSON -> _load_json 返回 {} ->
+# 所有 provider 的模型缓存一起消失。
+_lock = threading.RLock()
 
 DEFAULT_TTL = {
     "models": 6 * 3600,
@@ -32,28 +41,60 @@ def _load_json(path):
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (ValueError, OSError):
         return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _save_json(path, data):
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, path)
+    """原子写:唯一临时名 + fsync。
+
+    临时名必须唯一(不能 path.with_suffix('.tmp') 那种固定名):两个写者
+    会互相截断同一个 tmp 文件。fsync 是因为 os.replace 在 NTFS 上只保证
+    对读者原子,不保证数据已落盘,断电后可能留下 0 字节文件,
+    而 _load_json 对 0 字节文件返回 {} = 缓存全清。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(data, ensure_ascii=False, indent=2)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".",
+                               suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+        tmp = None
+    finally:
+        if tmp is not None and os.path.exists(tmp):
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
 def get_models(base_url, api_key, ttl=None):
     _ensure()
     ttl = ttl if ttl is not None else DEFAULT_TTL["models"]
-    cache = _load_json(MODELS_CACHE)
-    entry = cache.get(_hash(base_url, api_key))
-    if not entry:
+    with _lock:
+        cache = _load_json(MODELS_CACHE)
+    key = _hash(base_url, api_key)
+    entry = cache.get(key)
+    # 手改过的 / 被并发写坏的 models.json 里,字段类型不可信
+    if not isinstance(entry, dict):
         return None
-    if time.time() - entry.get("fetched_at", 0) > ttl:
+    fetched = entry.get("fetched_at")
+    if not isinstance(fetched, (int, float)) or isinstance(fetched, bool):
         return None
-    models = entry.get("models") or []
-    order = entry.get("order") or []
+    if time.time() - fetched > ttl:
+        return None
+    models = entry.get("models")
+    if not isinstance(models, list):
+        return None
+    order = entry.get("order")
+    if not isinstance(order, list):
+        order = []
     if order:
         present = [m for m in models if m in order]
         present_set = set(present)
@@ -65,44 +106,93 @@ def get_models(base_url, api_key, ttl=None):
 
 def set_models(base_url, api_key, models):
     _ensure()
-    cache = _load_json(MODELS_CACHE)
     key = _hash(base_url, api_key)
-    prev = cache.get(key) or {}
-    entry = {
-        "models": models,
-        "fetched_at": time.time(),
-    }
-    if prev.get("order"):
-        entry["order"] = prev["order"]
-    cache[key] = entry
-    _save_json(MODELS_CACHE, cache)
+    with _lock:
+        cache = _load_json(MODELS_CACHE)
+        prev = cache.get(key)
+        prev = prev if isinstance(prev, dict) else {}
+        entry = {
+            "models": list(models),
+            "fetched_at": time.time(),
+        }
+        if isinstance(prev.get("order"), list) and prev["order"]:
+            entry["order"] = prev["order"]      # 别把用户排好的顺序冲掉
+        cache[key] = entry
+        _save_json(MODELS_CACHE, cache)
 
 
 def save_model_order(base_url, api_key, order):
     """仅持久化排序,不更新 models 列表。"""
     _ensure()
-    cache = _load_json(MODELS_CACHE)
     key = _hash(base_url, api_key)
-    entry = cache.get(key) or {"models": [], "fetched_at": time.time()}
-    models = entry.get("models") or []
-    if models:
-        order = [m for m in order if m in models]
-    entry["order"] = list(order)
-    entry["fetched_at"] = time.time()
-    cache[key] = entry
-    _save_json(MODELS_CACHE, cache)
+    with _lock:
+        cache = _load_json(MODELS_CACHE)
+        entry = cache.get(key)
+        entry = dict(entry) if isinstance(entry, dict) else {
+            "models": [], "fetched_at": time.time()}
+        models = entry.get("models")
+        models = models if isinstance(models, list) else []
+        order = list(order)
+        if models:
+            order = [m for m in order if m in models]
+        entry["order"] = order
+        entry.setdefault("models", models)
+        entry["fetched_at"] = time.time()
+        cache[key] = entry
+        _save_json(MODELS_CACHE, cache)
 
 
 def invalidate_models(base_url=None, api_key=None):
     _ensure()
-    if base_url is None and api_key is None:
-        if MODELS_CACHE.exists():
-            MODELS_CACHE.unlink()
-        return
-    cache = _load_json(MODELS_CACHE)
-    key = _hash(base_url or "", api_key or "")
-    cache.pop(key, None)
-    _save_json(MODELS_CACHE, cache)
+    with _lock:
+        if base_url is None and api_key is None:
+            if MODELS_CACHE.exists():
+                MODELS_CACHE.unlink()
+            return
+        cache = _load_json(MODELS_CACHE)
+        cache.pop(_hash(base_url or "", api_key or ""), None)
+        _save_json(MODELS_CACHE, cache)
+
+
+PROBE_LOG_MAX_LINES = 2000
+
+
+def _trim_probe_log():
+    """probe.jsonl 只保留最近若干行。
+
+    它是 append-only 且无上限,常驻运行几个月会单调增长;而
+    recent_probes 每次都要整份读进内存再反转。超过阈值就从头部裁掉。
+    """
+    try:
+        with _lock:
+            if not PROBE_LOG.exists():
+                return
+            lines = PROBE_LOG.read_text(encoding="utf-8").splitlines()
+            if len(lines) <= PROBE_LOG_MAX_LINES:
+                return
+            keep = lines[-PROBE_LOG_MAX_LINES:]
+            _save_text_atomic(PROBE_LOG, "\n".join(keep) + "\n")
+    except OSError:
+        pass
+
+
+def _save_text_atomic(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".",
+                               suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+        tmp = None
+    finally:
+        if tmp is not None and os.path.exists(tmp):
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
 def log_probe(provider_name, model_id, success, latency_ms, error=""):
@@ -117,6 +207,7 @@ def log_probe(provider_name, model_id, success, latency_ms, error=""):
     }
     with PROBE_LOG.open("a", encoding="utf-8") as f:
         f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    _trim_probe_log()
 
 
 def save_alert_state(notified):
@@ -137,10 +228,16 @@ def save_alert_state(notified):
             if level not in ("warn", "critical"):
                 continue
             try:
-                clean[name] = [level, float(ts)]
+                ts = float(ts)
             except (TypeError, ValueError):
                 continue
-    _save_json(ALERT_STATE, {"notified": clean})
+            # NTP 回拨 / 手改文件都可能给出未来的时间戳。不夹取的话
+            # now - ts 是大负数,冷却判定会把这个 provider 静默到天荒地老
+            if ts > time.time() + 60:
+                continue
+            clean[name] = [level, ts]
+    with _lock:
+        _save_json(ALERT_STATE, {"notified": clean})
 
 
 def load_alert_state():
@@ -157,9 +254,12 @@ def load_alert_state():
         if len(value) != 2 or value[0] not in ("warn", "critical"):
             continue
         try:
-            out[name] = [value[0], float(value[1])]
+            ts = float(value[1])
         except (TypeError, ValueError):
             continue
+        if ts > time.time() + 60:
+            continue
+        out[name] = [value[0], ts]
     return out
 
 
