@@ -41,6 +41,9 @@ class Poller(threading.Thread):
     def run(self):
         while not self.stop.is_set():
             if self.state.paused:
+                # 暂停期间不 fetch,但 refresh_now() 会把 fetching 置 True
+                # (用来转圈提示),这里必须复位,否则条带会一直显示"刷新中…"
+                self.state.fetching = False
                 if self.wake.wait(0.5):
                     self.wake.clear()
                 continue
@@ -72,7 +75,11 @@ class Poller(threading.Thread):
     def fetch_once(self):
         self.state.fetching = True
         try:
-            results = fetch_all(self.cfg, skip_names=self.state.paused_providers)
+            # 传 stop:退出时 fetch_all 不再等在途请求(那些是 daemon 线程,
+            # 解释器退出不 join 它们),关窗后进程立刻消失
+            results = fetch_all(self.cfg,
+                                skip_names=tuple(self.state.paused_providers),
+                                stop=self.stop)
         finally:
             self.state.fetching = False
         self.state.results = results

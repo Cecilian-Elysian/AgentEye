@@ -1,5 +1,5 @@
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 from . import deepseek, generic, minimax, opencode_go, relay, zhipu
 
@@ -36,33 +36,81 @@ def collect_entries(cfg):
     return out
 
 
-def fetch_all(cfg, skip_names=None):
+MAX_CONCURRENT = 8
+
+
+def _cancelled(kind, entry):
+    """退出时还没轮到的那一条:不发请求,也不假装有数据。"""
+    res = _blank_result(kind, entry)
+    res.update({"detail": "已退出,本轮未拉取", "level": LEVEL_PAUSED})
+    return res
+
+
+def fetch_all(cfg, skip_names=None, stop=None):
     """并发拉取所有 provider。skip_names 里的条目不发请求,直接返回 paused 行。
 
-    两个硬性要求:
+    四个硬性要求:
     - 返回顺序必须与 cfg['providers'] 一致。panel 用 (name, type) 序列当
       重建签名,顺序一变就整面板 destroy 重建,滚动位置也会丢。
     - 单个 provider 抛异常只影响它自己那一行,不能连累其它条目。
+    - skip_names 先拷成 tuple:Tk 主线程随时可能增删 state.paused_providers,
+      正在迭代同一个 set 会抛 "Set changed size during iteration"。
+    - stop 是退出信号。不传就用 ThreadPoolExecutor 之外的普通 daemon 线程:
+      3.9+ 的 pool worker 是非守护线程,解释器退出时会 join 它们,
+      加上每家 12s 超时、中转站 6 个端点串行 + 401 重登重跑一轮,
+      关掉窗口后进程会在后台 invisible 挂两分多钟。daemon 线程不参与
+      那个 join,进程立即消失。
     """
     entries = collect_entries(cfg)
     if not entries:
         return []
-    skip = set(skip_names or ())
+    skip = set(tuple(skip_names or ()))
     todo = [(k, e) for k, e in entries if e.get("name") not in skip]
+
+    def stopping():
+        return stop is not None and stop.is_set()
 
     by_name = {}
     if todo:
-        with ThreadPoolExecutor(max_workers=max(4, len(todo))) as ex:
-            futures = {}
-            for kind, entry in todo:
-                fut = ex.submit(_one, kind, entry, cfg)
-                futures[fut] = (kind, entry)
-            for fut in futures:
-                kind, entry = futures[fut]
-                try:
-                    by_name[entry.get("name")] = fut.result()
-                except Exception as e:
-                    by_name[entry.get("name")] = _failed(kind, entry, e)
+        sem = threading.Semaphore(MAX_CONCURRENT)
+        done = {}          # name -> result
+
+        def worker(kind, entry):
+            try:
+                with sem:
+                    if stopping():
+                        return _cancelled(kind, entry)
+                    return _one(kind, entry, cfg)
+            except Exception as e:
+                return _failed(kind, entry, e)
+
+        threads = []
+        for kind, entry in todo:
+            name = entry.get("name")
+            if stopping():
+                by_name[name] = _cancelled(kind, entry)
+                continue
+            slot = {}
+            t = threading.Thread(target=lambda k=kind, e=entry, s=slot:
+                                 s.update(r=worker(k, e)),
+                                 name=f"fetch-{name}", daemon=True)
+            slot["name"] = name
+            slot["kind"] = kind
+            slot["entry"] = entry
+            threads.append((t, slot))
+            t.start()
+        for t, slot in threads:
+            # 退出时不等在途请求:它们是 daemon 线程,进程退出时会被直接掐掉
+            if stopping():
+                by_name[slot["name"]] = _cancelled(slot["kind"], slot["entry"])
+                continue
+            t.join()
+            if "r" in slot:
+                by_name[slot["name"]] = slot["r"]
+            else:
+                by_name[slot["name"]] = _failed(
+                    slot["kind"], slot["entry"],
+                    RuntimeError("拉取线程未返回结果"))
     for kind, entry in entries:
         if entry.get("name") in skip:
             by_name[entry.get("name")] = _paused(kind, entry)

@@ -14,6 +14,7 @@ import os
 import re
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -660,6 +661,77 @@ class TestOpencodeGoUrlFallback(unittest.TestCase):
         self.assertIn("key 无效", res["error"])
 
 
+class TestShutdownDoesNotLinger(unittest.TestCase):
+    """关窗后进程不该在后台 invisible 挂两分多钟。
+
+    根因:3.9+ 的 ThreadPoolExecutor worker 是非守护线程,解释器退出时
+    concurrent.futures 的 atexit 钩子会 join 它们;而每家请求 12s 超时,
+    中转站 6 个端点串行、401 还要重登重跑一轮。改成 daemon 线程后
+    解释器不 join,进程立即消失。
+    """
+
+    def _cfg(self, n=3):
+        return {"schema_version": 2, "providers": [
+            {"id": f"p{i}", "kind": "deepseek", "name": f"P{i}",
+             "key": "sk-x", "base_url": "https://h", "extra": {}}
+            for i in range(n)
+        ]}
+
+    def test_worker_threads_are_daemon(self):
+        import threading
+        seen = []
+
+        def spy(kind, entry, cfg):
+            seen.append(threading.current_thread().daemon)
+            return dict(providers._blank_result(kind, entry),
+                        name=entry["name"])
+
+        with mock.patch.object(providers, "_one", side_effect=spy):
+            providers.fetch_all(self._cfg())
+        self.assertEqual(seen, [True] * 3,
+                         "拉取线程必须 daemon,否则退出时会被 join 拖住")
+
+    def test_stop_prevents_new_requests(self):
+        stop = threading.Event()
+        stop.set()
+        calls = []
+
+        def spy(kind, entry, cfg):
+            calls.append(entry["name"])
+            return dict(providers._blank_result(kind, entry),
+                        name=entry["name"])
+
+        with mock.patch.object(providers, "_one", side_effect=spy):
+            res = providers.fetch_all(self._cfg(), stop=stop)
+        self.assertEqual(calls, [], "stop 已置位时不该再发任何请求")
+        self.assertEqual(len(res), 3, "仍须返回与 cfg 等长的行集")
+
+    def test_cancelled_rows_are_marked(self):
+        stop = threading.Event()
+        stop.set()
+        with mock.patch.object(providers, "_one",
+                               side_effect=AssertionError("不该被调用")):
+            res = providers.fetch_all(self._cfg(), stop=stop)
+        self.assertTrue(all(r["level"] == providers.LEVEL_PAUSED
+                            for r in res))
+
+    def test_skip_names_accepts_live_set(self):
+        """skip_names 传 set 时必须先拷快照,不能边迭代边被主线程改。"""
+        live = {"P1"}
+
+        def mutating_spy(kind, entry, cfg):
+            live.add(entry["name"])      # 模拟主线程同时点了另一个行
+            return dict(providers._blank_result(kind, entry),
+                        name=entry["name"])
+
+        with mock.patch.object(providers, "_one", side_effect=mutating_spy):
+            res = providers.fetch_all(self._cfg(), skip_names=live)
+        self.assertEqual(len(res), 3)
+        by_name = {r["name"]: r for r in res}
+        self.assertTrue(by_name["P1"]["paused"])
+        self.assertFalse(by_name["P0"]["paused"])
+
+
 class TestThemeListenerTeardown(unittest.TestCase):
 
     """widget 销毁后主题监听器必须自动反注册,不能残留。"""
@@ -692,4 +764,5 @@ class TestThemeListenerTeardown(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 
