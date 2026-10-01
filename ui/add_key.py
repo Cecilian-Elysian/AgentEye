@@ -52,7 +52,7 @@ class AddKeyForm(tk.Frame):
         super().__init__(parent, bg=to_tk_color(PALETTE.BG))
         self.on_save = on_save
         self.on_done = on_done
-        self.generic_probe = generic_probe or _generic_probe_stub
+        self.generic_probe = generic_probe or _generic_probe_default
         self._probe_thread = None
         self._probe_after_id = None
         self._probe_result = None
@@ -424,6 +424,11 @@ class AddKeyForm(tk.Frame):
             pass
 
 
-def _generic_probe_stub(base_url, key, timeout=8.0):
-    """未注入时返回 None 让 Add Key 仅完成 detect,跳过模型探测。"""
-    return None
+def _generic_probe_default(base_url, key, timeout=8.0):
+    """默认探测实现:走 generic 适配器,探测 quota 端点 + 拉模型列表。
+
+    旧桩实现恒返回 None,表单探测就只剩 detect,模型数/额度预览
+    永远不出现。timeout 形参保留给注入方,当前走适配器自身的超时。
+    """
+    from providers import generic
+    return generic.fetch({"base_url": base_url, "api_key": key})

@@ -1,4 +1,5 @@
 import re
+import time
 
 import requests
 
@@ -57,14 +58,35 @@ def _extract_items(body):
     return None
 
 
-def _fmt_reset(ms):
+def _fmt_reset(value):
+    """把重置时间格式化成剩余时长。
+
+    字段语义不统一:remains_time 是"还剩多少毫秒",而 reset_time 是
+    "到点的绝对时间戳"(秒或毫秒)。按量级自动判别,否则绝对时间戳被
+    当剩余时长,会算出"重置 19万小时"这种乱值。
+    """
     try:
-        sec = int(float(ms) / 1000)
+        v = float(value)
     except (TypeError, ValueError):
         return None
+    if v <= 0:
+        return None
+    if v >= 1e11:
+        return _fmt_remaining(v - time.time() * 1000.0)
+    if 1e9 <= v < 1e11:
+        # 秒级时间戳:毫秒时长最大 ~6e8(一周),不会落到这个区间
+        return _fmt_remaining(v * 1000.0 - time.time() * 1000.0)
+    return _fmt_remaining(v)
+
+
+def _fmt_remaining(ms):
+    sec = int(ms / 1000)
     if sec <= 0:
         return None
-    h, m = sec // 3600, (sec % 3600) // 60
+    d, rest = sec // 86400, sec % 86400
+    h, m = rest // 3600, (rest % 3600) // 60
+    if d:
+        return f"{d}d{h:02d}h"
     return f"{h}h{m:02d}m" if h else f"{m}m"
 
 

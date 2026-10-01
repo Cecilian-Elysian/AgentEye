@@ -404,14 +404,15 @@ class TestGenericBillingField(unittest.TestCase):
     def test_total_used_legacy_name(self):
         res = generic_mod._parse_openai_billing(
             {"total_granted": 100.0, "total_used": 30.0,
-             "total_available": 70.0})
+             "total_available": 70.0}, {})
         self.assertEqual(res["used"], 30.0)
 
     def test_total_used_amount_wrapper_name(self):
         res = generic_mod._parse_openai_billing(
             {"total_granted": 100.0, "total_used_amount": 30.0,
-             "total_available": 70.0})
+             "total_available": 70.0}, {})
         self.assertEqual(res["used"], 30.0)
+
 
 
 class TestPanelColorDictConsistency(unittest.TestCase):
@@ -1126,6 +1127,115 @@ class TestAlertStateClockSkew(unittest.TestCase):
         self.assertEqual(cache_mod.load_alert_state(), {})
         cache_mod.save_alert_state({"A": ["critical", time.time() - 10]})
         self.assertIn("A", cache_mod.load_alert_state())
+
+
+class TestRelayLoginFallback(unittest.TestCase):
+    """配了 email+password 且登录失败时,应降级用静态 token,而不是
+    整轮直接报"登录失败"。(站点登录接口改版/挂掉不该拖死额度查询)"""
+
+    def tearDown(self):
+        with relay._TOKEN_LOCK:
+            relay._TOKEN_CACHE.clear()
+
+    def test_login_failure_falls_back_to_static_token(self):
+        entry = {"base_url": "https://relay.example", "token": "sk-static",
+                 "email": "a@b.c", "password": "pw"}
+        calls = []
+
+        class R:
+            def __init__(self, status_code, payload):
+                self.status_code = status_code
+                self._p = payload
+
+            def json(self):
+                return self._p
+
+        def fake_get(url, headers=None, timeout=None):
+            calls.append(url)
+            return R(200, {"balance": 12.5, "unit": "USD"})
+
+        def fake_login_fail(url, json=None, timeout=None):
+            return R(500, {})
+
+        with mock.patch.object(relay.requests, "get", side_effect=fake_get), \
+                mock.patch.object(relay.requests, "post",
+                                  side_effect=fake_login_fail):
+            res = relay.fetch(entry)
+        self.assertNotIn("登录失败", str(res.get("error", "")),
+                         "有静态 token 就不该报登录失败")
+        self.assertEqual(res.get("remaining"), 12.5)
+        self.assertTrue(any("/v1/usage" in u or "/api/" in u for u in calls))
+
+
+class TestMinimaxResetTimeAbs(unittest.TestCase):
+    """reset_time 是绝对时间戳(秒/毫秒),不能当剩余毫秒数格式化,
+    否则会显示"重置 19万小时"这种乱值。"""
+
+    def test_absolute_epoch_seconds(self):
+        future_s = time.time() + 90 * 60
+        out = minimax_mod._fmt_reset(future_s)
+        self.assertIsNotNone(out)
+        self.assertLessEqual(len(out), 5)          # 形如 "1h30m"
+        self.assertIn("h", out)
+
+    def test_absolute_epoch_ms(self):
+        future_ms = (time.time() + 3 * 86400) * 1000
+        out = minimax_mod._fmt_reset(future_ms)
+        self.assertIsNotNone(out)
+        self.assertIn("d", out)                    # 3 天 → "3d00h"
+
+    def test_remaining_ms_still_works(self):
+        # remains_time 语义:剩余毫秒时长
+        self.assertEqual(minimax_mod._fmt_reset(30 * 60 * 1000), "30m")
+
+    def test_past_timestamp_is_none(self):
+        self.assertIsNone(minimax_mod._fmt_reset(time.time() - 3600))
+
+
+class TestGenericQuotaPerUsdOverride(unittest.TestCase):
+    """entry 配置的 quota_per_usd 必须优先于响应体(很多 one-api 站
+    /api/user/self 根本不返回 quota_per_usd)。"""
+
+    def test_entry_override_wins(self):
+        res = generic_mod._parse_new_api_self(
+            {"data": {"quota": 500000, "used_quota": 100000,
+                      "quota_per_usd": 1000}},
+            {"quota_per_usd": 500000})
+        self.assertAlmostEqual(res["remaining"], 1.0)
+        self.assertAlmostEqual(res["used"], 0.2)
+
+    def test_response_value_as_fallback(self):
+        res = generic_mod._parse_new_api_self(
+            {"data": {"quota": 1000, "used_quota": 0,
+                      "quota_per_usd": 1000}}, {})
+        self.assertAlmostEqual(res["remaining"], 1.0)
+
+
+class TestOpencodeNormPctBoundary(unittest.TestCase):
+    """v==1 在旧启发式下会被 ×100 变成 100%,实际 API 的 0-100 语义里
+    它就是 1%。只有严格介于 0 和 1 之间的值才当比例放大。"""
+
+    def test_one_stays_one(self):
+        from providers import opencode_go
+        self.assertEqual(opencode_go._norm_pct(1.0), 1.0)
+
+    def test_fraction_scales(self):
+        from providers import opencode_go
+        self.assertEqual(opencode_go._norm_pct(0.35), 35.0)
+
+    def test_over_one_untouched(self):
+        from providers import opencode_go
+        self.assertEqual(opencode_go._norm_pct(87.5), 87.5)
+
+
+class TestDetectNoDeadCondition(unittest.TestCase):
+    """旧写法 `endswith("/v1") or "/v1" in url.split("/")[-1:]` 的第二支
+    与第一支完全等价,是恒假冗余;行为上 /v1 结尾仍要识别为 generic。"""
+
+    def test_v1_suffix_still_detected(self):
+        from providers import detect as detect_mod
+        res = detect_mod.detect(key="", hint_url="https://x.example/v1")
+        self.assertEqual(res["kind"], "generic_openai")
 
 
 class TestShutdownDoesNotLinger(unittest.TestCase):

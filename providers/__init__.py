@@ -12,8 +12,6 @@ ADAPTERS = {
     "generic_openai": generic.fetch,
 }
 
-AMOUNT_UNITS = ("$", "¥")
-
 LEVEL_ERROR = "error"
 LEVEL_UNKNOWN = "unknown"
 LEVEL_PAUSED = "paused"
@@ -156,16 +154,29 @@ def _paused(kind, entry):
     return res
 
 
+class KeyDecryptError(Exception):
+    """key_enc 存在但 DPAPI 解不出明文(密文损坏或换了 Windows 用户)。
+
+
+    与"没配 key"(unconfigured)区分开:前者提示用户密文坏了需要重填,
+    后者只是提醒还没填。
+    """
+
+
 def _resolve_key(entry):
-    """取明文 key:优先内存态 key,否则解 key_enc(磁盘态兜底)。"""
+    """取明文 key:优先内存态 key,否则解 key_enc(磁盘态兜底)。
+
+    key_enc 存在但解密失败时抛 KeyDecryptError,调用方报专门错误,
+    不与"未配置"混为一谈。
+    """
     key = entry.get("key") or ""
     if key or not entry.get("key_enc"):
         return key
-    try:
-        from config import plain_key
-        return plain_key(entry) or ""
-    except Exception:
-        return ""
+    from config import plain_key
+    resolved = plain_key(entry)
+    if not resolved:
+        raise KeyDecryptError("key_enc 解密失败,请在设置里重新填写 key")
+    return resolved
 
 
 def _to_legacy_entry(p, key):
@@ -203,7 +214,11 @@ def _num(value, default):
 
 def _one(kind, entry, cfg):
     result = _blank_result(kind, entry)
-    key = _resolve_key(entry)
+    try:
+        key = _resolve_key(entry)
+    except KeyDecryptError as e:
+        result.update({"error": str(e), "level": LEVEL_ERROR})
+        return result
     login_creds = bool((entry.get("extra") or {}).get("email")
                        and (entry.get("extra") or {}).get("password"))
     if key in PLACEHOLDER_KEYS:

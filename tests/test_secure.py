@@ -192,10 +192,12 @@ class TestPollingResolvesEncryptedKey(ConfigPathMixin):
         self.assertEqual(loaded["providers"][0]["key"], expect)
 
     def test_resolve_key_prefers_plain_field(self):
-        from providers import _resolve_key
+        from providers import KeyDecryptError, _resolve_key
         self.assertEqual(_resolve_key({"key": "sk-plain"}), "sk-plain")
         self.assertEqual(_resolve_key({}), "")
-        self.assertEqual(_resolve_key({"key_enc": "###bad###"}), "")
+        # key_enc 解不开不再是静默空串:必须可区分地报出来
+        with self.assertRaises(KeyDecryptError):
+            _resolve_key({"key_enc": "###bad###"})
 
     def test_one_marks_unconfigured_without_any_key(self):
         from providers import _one

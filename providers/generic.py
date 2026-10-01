@@ -100,7 +100,7 @@ def fetch(entry):
         except ValueError:
             errors.append(f"{label}: 非JSON")
             continue
-        result = _PARSERS[parser_name](body)
+        result = _PARSERS[parser_name](body, entry)
         if result:
             result["quota_endpoint"] = path
             parsed = result
@@ -129,7 +129,7 @@ def fetch(entry):
 
 
 @_parser("_parse_openai_billing")
-def _parse_openai_billing(body):
+def _parse_openai_billing(body, entry):
     if not isinstance(body, dict):
         return None
     try:
@@ -154,7 +154,7 @@ def _parse_openai_billing(body):
 
 
 @_parser("_parse_openai_subscription")
-def _parse_openai_subscription(body):
+def _parse_openai_subscription(body, entry):
     if not isinstance(body, dict) or "data" not in body:
         return None
     data = body["data"]
@@ -183,7 +183,7 @@ def _parse_openai_subscription(body):
 
 
 @_parser("_parse_deepseek_balance")
-def _parse_deepseek_balance(body):
+def _parse_deepseek_balance(body, entry):
     if not isinstance(body, dict):
         return None
     infos = body.get("balance_infos")
@@ -212,7 +212,7 @@ def _parse_deepseek_balance(body):
 
 
 @_parser("_parse_new_api_self")
-def _parse_new_api_self(body):
+def _parse_new_api_self(body, entry):
     if not isinstance(body, dict):
         return None
     data = body.get("data") if isinstance(body.get("data"), dict) else body
@@ -222,7 +222,10 @@ def _parse_new_api_self(body):
     try:
         quota = float(quota)
         used = float(data.get("used_quota") or 0)
-        per_usd = float(data.get("quota_per_usd") or 500000)
+        # 用户配置的换算率优先(one-api 系响应里经常不给 quota_per_usd),
+        # 响应体里的值兜底
+        per_usd = float(entry.get("quota_per_usd")
+                        or data.get("quota_per_usd") or 500000)
     except (TypeError, ValueError):
         return None
     remaining = quota / per_usd

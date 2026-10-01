@@ -1,4 +1,5 @@
 import re
+import threading
 import time
 
 import requests
@@ -9,6 +10,7 @@ QUOTA_PER_USD_DEFAULT = 500000.0
 LOGIN_PATH = "/api/v1/auth/login"
 
 _TOKEN_CACHE = {}
+_TOKEN_LOCK = threading.Lock()
 
 CANDIDATES = (
     ("new_api", "/api/user/self"),
@@ -51,7 +53,13 @@ def fetch(entry):
         if use_access_token:
             auth_token, err = _get_access_token(base, email, password)
             if not auth_token:
-                return {"error": f"登录失败: {err}"}
+                if token:
+                    # 登录接口挂了/改版了,但静态 token 还在:降级用它,
+                    # 别把整轮额度查询直接判死
+                    use_access_token = False
+                    auth_token = token
+                else:
+                    return {"error": f"登录失败: {err}"}
 
         headers = {"Authorization": f"Bearer {auth_token}", "Accept": "application/json"}
         headers.update(extra_headers)
@@ -65,7 +73,8 @@ def fetch(entry):
                 errors.append(f"{path}: {e.__class__.__name__}")
                 continue
             if r.status_code == 401 and use_access_token and not relogged:
-                _TOKEN_CACHE.pop(_cache_key(base, email), None)
+                with _TOKEN_LOCK:
+                    _TOKEN_CACHE.pop(_cache_key(base, email), None)
                 relogged = True
                 break
             if r.status_code != 200:
@@ -89,9 +98,11 @@ def fetch(entry):
 
 
 def _get_access_token(base, email, password):
-    cached = _TOKEN_CACHE.get(_cache_key(base, email))
-    if cached and cached["expiry"] > time.time():
-        return cached["token"], None
+    key = _cache_key(base, email)
+    with _TOKEN_LOCK:
+        cached = _TOKEN_CACHE.get(key)
+        if cached and cached["expiry"] > time.time():
+            return cached["token"], None
     try:
         r = requests.post(
             base + LOGIN_PATH,
@@ -106,6 +117,8 @@ def _get_access_token(base, email, password):
         data = r.json()
     except ValueError:
         return None, "响应非JSON"
+    if not isinstance(data, dict):
+        return None, "响应结构非对象"
     token = data.get("access_token")
     if not token:
         return None, "响应无 access_token"
@@ -113,10 +126,11 @@ def _get_access_token(base, email, password):
         ttl = float(data.get("expires_in") or 3600)
     except (TypeError, ValueError):
         ttl = 3600.0
-    _TOKEN_CACHE[_cache_key(base, email)] = {
-        "token": token,
-        "expiry": time.time() + max(60.0, ttl - 60.0),
-    }
+    with _TOKEN_LOCK:
+        _TOKEN_CACHE[key] = {
+            "token": token,
+            "expiry": time.time() + max(60.0, ttl - 60.0),
+        }
     return token, None
 
 
@@ -231,13 +245,34 @@ def _parse_generic(body, entry):
         sum_total += _deep_find(item, TOTAL_KEYS) or 0
     if not found:
         return None
-    unit = entry.get("unit") or "额度"
-    detail = f"剩余 {sum_remaining:,.2f}{unit}"
-    if key_count > 1:
-        detail += f" · {key_count} 个 key"
+    # one-api 系站点的 quota 是"内部点数";配置了 quota_per_usd 才知道
+    # 多少点等于 1 美元,换算成 $ 展示。没配就按原样当"额度"数。
+    per_usd = None
+    try:
+        per_usd = float(entry.get("quota_per_usd") or 0) or None
+    except (TypeError, ValueError):
+        per_usd = None
+    if per_usd:
+        sum_remaining /= per_usd
+        sum_used /= per_usd
+        sum_total /= per_usd
+        unit = "$"
+        if sum_total > 0:
+            detail = (f"剩余 ${sum_remaining:,.2f}"
+                      + (f" · {key_count} 个 key" if key_count > 1 else "")
+                      + f" · 总量 ${sum_total:,.2f}")
+        else:
+            detail = (f"剩余 ${sum_remaining:,.2f}"
+                      + (f" · {key_count} 个 key" if key_count > 1 else ""))
+    else:
+        unit = entry.get("unit") or "额度"
+        detail = f"剩余 {sum_remaining:,.2f}{unit}"
+        if key_count > 1:
+            detail += f" · {key_count} 个 key"
+        if sum_total > 0:
+            detail += f" · 总量 {sum_total:,.2f}"
     if sum_total > 0:
         pct = sum_remaining / sum_total * 100
-        detail += f" · 总量 {sum_total:,.2f}"
         return {
             "remaining": sum_remaining,
             "used": sum_used or None,

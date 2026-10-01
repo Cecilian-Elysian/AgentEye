@@ -44,7 +44,9 @@ def detect(key="", hint_url=""):
                     "confidence": "high",
                     "notes": note,
                 }
-        if hint_url.endswith("/v1") or "/v1" in hint_url.split("/")[-1:]:
+        # 注意:第二支 `"/v1" in hint_url.split("/")[-1:]` 与 endswith
+        # 完全等价(单元素列表),是恒假冗余,已删
+        if hint_url.endswith("/v1"):
             return {
                 "kind": "generic_openai",
                 "base_url": hint_url,

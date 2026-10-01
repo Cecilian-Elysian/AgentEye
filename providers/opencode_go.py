@@ -22,7 +22,10 @@ def _norm_pct(v):
         v = float(v)
     except (TypeError, ValueError):
         return None
-    if v <= 1:
+    # 兼容 0-1 比例语义(0.35 → 35%)。严格小于 1 才翻倍:
+    # 恰好 1.0 有歧义(1% 还是 100%),按 1% 处理,和 v<=1 旧写法的
+    # 差别是 v==1 不再被误放大 100 倍。
+    if 0 < v < 1:
         v *= 100
     return max(0.0, min(100.0, v))
 

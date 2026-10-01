@@ -542,9 +542,20 @@ class SettingsDialog(MacToplevel):
     # ---------- 设置项 ----------
 
     def _on_theme_radio_click(self):
-        """Radio 点击立即应用主题。"""
+        """Radio 点击立即应用并落盘主题。
+
+        persist=False 不落盘的话,用户切完主题直接关窗口,重启就回退;
+        而走 _save() 又会把表单里没保存的其他改动一起写进去。
+        所以这里只把 theme 字段写进 cfg 并走一次保存回调。
+        """
         choice = self._theme_var.get()
         set_theme(choice, broadcast=True, persist=False)
+        (self._cfg.setdefault("ui", {}))["theme"] = choice
+        if self._on_save:
+            try:
+                self._on_save(self._cfg)
+            except Exception:
+                pass
 
     def _save(self):
         cfg = self._cfg
