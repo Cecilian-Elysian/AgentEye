@@ -1,4 +1,5 @@
 {
+  "_说明": "复制为 ~/.agenteye/config.json 使用。首次保存后 key 会被加密成 key_enc,示例里的明文 key 只用于第一次启动。",
   "schema_version": 2,
   "refresh_interval_sec": 30,
   "alert": {
@@ -23,6 +24,7 @@
       "name": "DeepSeek",
       "key": "在这里粘贴DeepSeek的key",
       "base_url": "https://api.deepseek.com",
+      "api_key_env": "DEEPSEEK_API_KEY",
       "extra": {}
     },
     {
@@ -31,10 +33,20 @@
       "name": "某中转站",
       "key": "在这里粘贴中转站的key",
       "base_url": "https://api.example.com/v1",
+      "quota_per_usd": 500000,
       "extra": {
         "email": "站点登录邮箱(管理接口需登录时填)",
         "password": "站点登录密码(不需要登录就删掉这两行)"
       }
+    },
+    {
+      "id": "0f9e8d7c6b5a",
+      "kind": "generic_openai",
+      "name": "OpenAI 兼容站点",
+      "key": "sk-...",
+      "base_url": "https://api.example.com/v1",
+      "api_key_env": "MY_CUSTOM_ENV_NAME",
+      "extra": {}
     }
   ]
 }
