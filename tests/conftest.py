@@ -15,6 +15,7 @@
 
 import time
 import tkinter as tk
+import weakref
 
 import pytest
 
@@ -39,6 +40,33 @@ def _retrying_tk_init(self, *args, **kwargs):
 tk.Tk.__init__ = _retrying_tk_init
 
 
+def _stop_panel_timers():
+    """在每个测试之间停掉仍然存活的 Panel 定时器。
+
+    Panel._tick 每秒自我续期且挂在 slot Frame 上。测试里直接
+    root.destroy() 时,Tk 会连解释器一起拆掉,队列里残留的 after 回调
+    会在下一个测试的事件循环里打到已销毁的解释器上 —— 表现为
+    "Windows fatal exception 0x80000003",整个 pytest 进程直接崩,
+    而且崩在**下一个**测试里,根因极难定位。
+    """
+    try:
+        from ui import panel as panel_mod
+    except Exception:
+        panel_mod = None
+    try:
+        from ui import essential_bar as bar_mod
+    except Exception:
+        bar_mod = None
+    for mod, attr in ((panel_mod, "_LIVE_PANELS"), (bar_mod, "_LIVE_BARS")):
+        if mod is None:
+            continue
+        for obj in list(getattr(mod, attr, ())):
+            try:
+                obj.stop()
+            except Exception:
+                pass
+
+
 @pytest.fixture(autouse=True)
 def isolated_state_paths(tmp_path, monkeypatch):
     """把 config / cache 的落盘位置重定向到本测试专属的临时目录。"""
@@ -53,3 +81,4 @@ def isolated_state_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(cache_mod, "ALERT_STATE",
                         cache_dir / "alert_state.json")
     yield
+    _stop_panel_timers()

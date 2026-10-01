@@ -15,6 +15,7 @@ import re
 import sys
 import tempfile
 import threading
+import tkinter as tk
 import time
 import unittest
 from pathlib import Path
@@ -736,10 +737,22 @@ class TestAlertCooldownNotInherited(unittest.TestCase):
 
 
 def tk_root():
+    """建一个隐形 Tk root,顺手清掉上一个遗留的 grab。
+
+    ModelPanel/SettingsDialog 构造时会 grab_set()。同一进程里连续建多个
+    Tk root 时,上一个的 grab 可能还挂着,新窗口 grab_set() 抛
+    "grab failed: another application has grab",会把整个测试进程带崩。
+    """
     import tkinter as tk
     r = tk.Tk()
     r.withdraw()
     r.attributes("-alpha", 0.0)
+    try:
+        for child in r.winfo_children():
+            if child.grab_current():
+                child.grab_release()
+    except tk.TclError:
+        pass
     return r
 
 
@@ -802,6 +815,10 @@ class TestBarMatchesColor(unittest.TestCase):
                    "save_model_order": lambda *a: None}
         p = panel_mod.Panel(top, state, {"ui": {}, "providers": [],
                                          "alert": {}}, actions)
+        try:
+            p.stop()
+        except Exception:
+            pass
         p._update()
         widgets = p._rows["Z"]
         p._paint_row(widgets, state.results[0])
@@ -850,11 +867,176 @@ class TestBarMatchesColor(unittest.TestCase):
                    "save_model_order": lambda *a: None}
         p = panel_mod.Panel(top, state, {"ui": {}, "providers": [],
                                          "alert": {}}, actions)
+        try:
+            p.stop()
+        except Exception:
+            pass
         p._update()
         widgets = p._rows["E"]
         # 出错/未配置的行根本不给画进度条,更不会画出误导性的满格灰条
         self.assertIsNone(widgets["bar"])
         p._paint_row(widgets, state.results[0])   # 不应抛异常
+
+
+class TestModelDragWithFilter(unittest.TestCase):
+    """搜索过滤状态下拖拽,落盘的全量顺序不能被写坏。
+
+    旧实现把"可见列表里的下标"直接拿去插全量列表,并 on_reorder 落盘,
+    结果是错序持久化,用户只能自己重拖才能纠正。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = tk_root()
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.root.destroy()
+        except tk.TclError:
+            pass
+
+    def _make(self, models):
+        from ui import model_panel as mp_mod
+        self.saved = []
+        p = mp_mod.ModelPanel(self.root, "P", list(models),
+                              on_reorder=lambda o: self.saved.append(list(o)))
+        # ModelPanel 构造时 grab_set();不释放的话同一进程里下一个窗口
+        # grab_set() 会抛 "grab failed",把测试进程带崩
+        self.addCleanup(self._cleanup, p)
+        return p
+
+    def _cleanup(self, p):
+        try:
+            if p.grab_current():
+                p.grab_release()
+        except tk.TclError:
+            pass
+        try:
+            p.destroy()
+        except tk.TclError:
+            pass
+
+    def test_reorder_without_filter(self):
+        p = self._make(["m1", "m2", "m3"])
+        p._commit_model_drag("m1", 2)
+        self.assertEqual(list(p.models), ["m2", "m3", "m1"])
+        self.assertEqual(self.saved[-1], ["m2", "m3", "m1"])
+
+    def test_reorder_while_filtered_keeps_hidden_items(self):
+        p = self._make(["keep1", "drop1", "keep2", "drop2"])
+        p.filtered = ["keep1", "keep2"]        # 模拟搜索过滤后只剩 keep*
+        p._commit_model_drag("keep1", 1)
+        self.assertEqual(sorted(p.models),
+                         ["drop1", "drop2", "keep1", "keep2"],
+                         "条目不能凭空丢失")
+        vis = [m for m in p.models if m.startswith("keep")]
+        self.assertEqual(vis, ["keep2", "keep1"], "可见顺序确实变了")
+        self.assertEqual(len(self.saved[-1]), 4)
+
+    def test_filtered_reorder_does_not_corrupt_persisted_order(self):
+        """旧实现会把 keep1 插到全量下标 1,落盘成错序。"""
+        p = self._make(["keep1", "drop1", "keep2", "drop2"])
+        p.filtered = ["keep1", "keep2"]
+        p._commit_model_drag("keep1", 1)
+        out = self.saved[-1]
+        self.assertEqual(sorted(out),
+                         ["drop1", "drop2", "keep1", "keep2"],
+                         "落盘列表必须仍是原来那 4 个")
+        self.assertLess(out.index("keep2"), out.index("keep1"),
+                        "可见顺序必须被尊重")
+        # 隐藏项保持原相对位置:drop1 仍在最前
+        self.assertEqual(out[0], "drop1")
+
+
+class TestFocusInDebounce(unittest.TestCase):
+    """点设置对话框里的输入框不该触发整轮轮询。"""
+
+    @classmethod
+    def setUpClass(cls):
+        # 一个类共用一个 Tk root:进程里反复建/销毁多个完整解释器
+        # (tk_root() 每次一个)在 Windows 的 Tk 上不稳定,会在后面的
+        # 测试里随机崩掉整个 pytest 进程(fatal exception 0x80000003)。
+        cls.root = tk_root()
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            cls.root.destroy()
+        except tk.TclError:
+            pass
+
+    def _panel(self):
+        from ui import panel as panel_mod
+
+        class _S:
+            results = []
+            paused = False
+            paused_providers = set()
+            fetching = False
+            poll_error = None
+            save_error = None
+            next_fetch = 0.0
+
+        self.state = _S()
+        self.hits = []
+        actions = {"refresh_now": lambda: self.hits.append(1),
+                   "toggle_pause": lambda: None, "test_notify": lambda: None,
+                   "quit": lambda: None, "save_position": lambda *a: None,
+                   "save_size": lambda *a: None, "save_order": lambda *a: None,
+                   "save_pin": lambda *a: None, "get_order": lambda: [],
+                   "open_config": lambda: None, "open_settings": lambda: None,
+                   "add_key": lambda: None, "delete_provider": lambda n: None,
+                   "edit_provider": lambda n: None,
+                   "pause_provider": lambda n: None,
+                   "probe_models": lambda n: None,
+                   "probe_model": lambda *a, **k: (False, 0.0, ""),
+                   "save_model_order": lambda *a: None}
+        cfg = {"ui": {}, "providers": [], "alert": {}}
+        top = tk.Toplevel(self.root)
+        self.addCleanup(self._teardown, top)
+        p = panel_mod.Panel(top, self.state, cfg, actions,
+                            root_window=self.root)
+        return p, top
+
+    def _teardown(self, top):
+        try:
+            top.destroy()
+        except tk.TclError:
+            pass
+
+    def test_child_focus_does_not_trigger(self):
+        p, top = self._panel()
+        entry = tk.Entry(top)
+        entry.pack()
+        p._on_focus_in(type("E", (), {"widget": entry})())
+        self.assertEqual(self.hits, [],
+                         "子控件获得焦点不该触发全量轮询")
+
+    def test_toplevel_focus_triggers_once(self):
+        p, top = self._panel()
+        # 生产里 root_window 就是应用主窗口,FocusIn 的 widget 是它本身
+        p._on_focus_in(type("E", (), {"widget": self.root})())
+        self.assertEqual(len(self.hits), 1)
+        # 紧接着再来一次应被去抖挡掉
+        p._on_focus_in(type("E", (), {"widget": top})())
+        self.assertEqual(len(self.hits), 1, "最小间隔内不该重复触发")
+
+    def test_fetching_blocks(self):
+        p, top = self._panel()
+        self.state.fetching = True
+        p._on_focus_in(type("E", (), {"widget": self.root})())
+        self.assertEqual(self.hits, [])
+
+    def test_stop_cancels_tick(self):
+        """窗口销毁前必须停掉 1Hz 定时器,否则残留回调打到已销毁的
+        解释器上,会让整个进程崩在 Tk 内部。"""
+        p, top = self._panel()
+        p._update()
+        self.assertIsNotNone(p._tick_after_id, "tick 应该在跑")
+        p.stop()
+        self.assertIsNone(p._tick_after_id)
+        p.stop()          # 幂等:重复调用不应抛异常
 
 
 class TestCacheConcurrentWrites(unittest.TestCase):
@@ -1049,6 +1231,10 @@ class TestThemeListenerTeardown(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+
 
 
 

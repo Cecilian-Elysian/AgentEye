@@ -10,6 +10,7 @@
 import re
 import time
 import tkinter as tk
+import weakref
 
 import config as config_mod
 from ui.theme import PALETTE, set_theme, bind_theme_listener, to_tk_color, to_tk_color_blended
@@ -45,6 +46,14 @@ MAX_W, MAX_H = 800, 900
 RESIZE_GRIP = 16
 BTN_BG = "#2a2a3a"
 BTN_HOVER = "#34344a"
+
+# 活着且还在跑 1Hz 定时器的 Panel。测试之间由 conftest 统一 stop(),
+# 生产代码不需要读它。
+_LIVE_PANELS = weakref.WeakSet()
+
+
+def _register_self(panel):
+    _LIVE_PANELS.add(panel)
 
 
 def _refresh_BTN():
@@ -280,6 +289,9 @@ class Panel:
         self._sig = None
         self._rows = {}
         self._last_paint = {}
+        self._last_focus_refresh = 0.0
+        self._tick_after_id = None
+        _register_self(self)
         self._last_results = []
         self._minimized = False
         self._drag_ok = False
@@ -362,15 +374,31 @@ class Panel:
         # 这里主动刷一次,让首帧就用当前主题的色。
         self.refresh_palette()
 
-    def _on_focus_in(self, event=None):
-        """窗口级重新激活时刷新一次。
+    FOCUS_REFRESH_MIN_INTERVAL = 3.0
 
-        绝不能绑在行内的 Text/Entry 上:Tk 的 FocusIn 会沿父链冒泡,
-        那样点任意一行都会触发一次全量轮询。
+    def _on_focus_in(self, event=None):
+        """窗口重新激活时刷新一次(去抖)。
+
+        Tk 会为焦点控件**及其每一层祖先**各生成一个 FocusIn,而 bindtags
+        里的 toplevel 是所有后代的第 3 个 tag —— 所以绑在 toplevel 上时,
+        点设置对话框里任意输入框、模型面板搜索框都会触发一次全量轮询。
+        README 说的是"窗口获得焦点",实际发生的却是"任何子控件"。
+
+        两道闸:
+        - 只认 toplevel 本身的 FocusIn(event.widget 是 toplevel),子控件
+          点进来的 FocusIn 一律忽略;
+        - 加最小间隔,防止开/关对话框这类连续动作连发多轮请求。
         """
         state = getattr(self, "state", None)
         if state is not None and getattr(state, "fetching", False):
             return
+        top = self.root_window or self.root
+        if event is not None and getattr(event, "widget", None) is not top:
+            return
+        now = time.time()
+        if now - self._last_focus_refresh < self.FOCUS_REFRESH_MIN_INTERVAL:
+            return
+        self._last_focus_refresh = now
         self.actions["refresh_now"]()
 
     def _place_initial(self):
@@ -712,13 +740,22 @@ class Panel:
 
     def _rows_wheel_enter(self, event):
         try:
-            self.rows_canvas.bind_all("<MouseWheel>", self._on_rows_wheel)
+            # 记下 funcid,离开时只摘自己那一个。unbind_all(sequence) 会把
+            # "all" bindtag 上该序列的**所有**绑定清掉,包括设置对话框和
+            # 模型面板的 —— 于是"面板行区 → 设置列表 → 移出"之后,
+            # 面板的滚轮就没了,直到鼠标重新进出行区。
+            self._rows_wheel_funcid = self.rows_canvas.bind_all(
+                "<MouseWheel>", self._on_rows_wheel, add="+")
         except tk.TclError:
             pass
 
     def _rows_wheel_leave(self, event):
+        fid = getattr(self, "_rows_wheel_funcid", None)
+        self._rows_wheel_funcid = None
+        if fid is None:
+            return
         try:
-            self.rows_canvas.unbind_all("<MouseWheel>")
+            self.rows_canvas.unbind_all("<MouseWheel>", fid)
         except tk.TclError:
             pass
 
@@ -861,12 +898,29 @@ class Panel:
             pass
 
     def _tick(self):
+        self._tick_after_id = None
         try:
-            if self.root.winfo_exists():
-                self._update()
-                self.root.after(1000, self._tick)
+            if not self.root.winfo_exists():
+                return
+            self._update()
+            self._tick_after_id = self.root.after(1000, self._tick)
         except tk.TclError:
             pass
+
+    def stop(self):
+        """停掉 1Hz 定时器。窗口销毁前必须调用。
+
+        定时器只挂在 self.root 上,窗口被销毁时 Tk 会把该窗口的 after
+        一起清掉,但如果 root 是被外部直接 destroy 掉、解释器随之拆掉,
+        队列里残留的回调会在下一个事件循环里打到已销毁的解释器上,
+        表现为整个进程崩在 Tk 内部(Windows fatal exception)。
+        """
+        aid, self._tick_after_id = self._tick_after_id, None
+        if aid is not None:
+            try:
+                self.root.after_cancel(aid)
+            except tk.TclError:
+                pass
 
     def _update(self):
         results = list(self.state.results or [])

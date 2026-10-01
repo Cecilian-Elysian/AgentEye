@@ -50,6 +50,7 @@ class AddKeyForm(tk.Frame):
         self.on_done = on_done
         self.generic_probe = generic_probe or _generic_probe_stub
         self._probe_thread = None
+        self._probe_after_id = None
         self._probe_result = None
         self._probe_started_at = 0.0
         self._show_count = show_count
@@ -287,9 +288,22 @@ class AddKeyForm(tk.Frame):
     def _schedule_probe(self, delay=0.3):
         if self._probe_thread and self._probe_thread.is_alive():
             return
-        self.after(int(delay * 1000), self._probe_now)
+        # 连续击键会排出一串 0.6s 定时器(无上限),表单销毁后它们照样触发,
+        # 在已销毁控件上 config(...) 抛 TclError。只保留最后一个。
+        if self._probe_after_id is not None:
+            try:
+                self.after_cancel(self._probe_after_id)
+            except tk.TclError:
+                pass
+        self._probe_after_id = self.after(int(delay * 1000), self._probe_now)
 
     def _probe_now(self):
+        self._probe_after_id = None
+        try:
+            if not self.winfo_exists():
+                return
+        except tk.TclError:
+            return
         if self._probe_thread and self._probe_thread.is_alive():
             return
         if self._key_placeholder:
@@ -321,7 +335,13 @@ class AddKeyForm(tk.Frame):
             except Exception as e:
                 probe_result = {"error": str(e)}
         elapsed = time.time() - self._probe_started_at
-        self.after(0, self._probe_done, detected, probe_result, elapsed)
+        # 后台线程里调 Tk:窗口在这 8 秒内被关掉时 after 会抛,
+        # 裸抛会在线程里打一条用户看不到的 traceback(而且 save_btn
+        # 永远停在 disabled)。同款代码在 model_panel 里已有 TclError 兜底。
+        try:
+            self.after(0, self._probe_done, detected, probe_result, elapsed)
+        except (tk.TclError, RuntimeError):
+            pass
 
     def _probe_done(self, detected, probe_result, elapsed):
         self.detect_btn.config(state="normal")

@@ -333,11 +333,37 @@ class ModelPanel(MacToplevel):
     def _commit_model_drag(self, mid, new_index):
         if mid not in self.models:
             return
-        self.models.remove(mid)
-        self.models.insert(max(0, min(new_index, len(self.models))), mid)
-        if hasattr(self, "filtered") and mid in self.filtered:
-            self.filtered.remove(mid)
-            self.filtered.insert(max(0, min(new_index, len(self.filtered))), mid)
+        # new_index 是**可见(过滤后)**列表里的下标 —— _model_target_index
+        # 只遍历 inner 里渲染出来的行。直接拿它去插 self.models(全量)会把
+        # 顺序写坏,而且 on_reorder 落盘的就是这个错序(用户只能自己重拖才能
+        # 纠正)。所以先把可见域的重排算好,再按位置映射回全量。
+        others = [m for m in self.models if m != mid]
+        filtered = list(getattr(self, "filtered", None) or self.models)
+        # 过滤是否生效(要在移除 mid **之前**比,否则长度天然差 1)
+        filtering = len(filtered) != len(self.models) or \
+            set(filtered) != set(self.models)
+        vis = [m for m in filtered if m != mid]
+        idx = max(0, min(new_index, len(vis)))
+        new_vis = vis[:idx] + [mid] + vis[idx:]
+
+        if not filtering:
+            # 全部可见:索引域一致,直接用
+            self.models = new_vis
+        else:
+            # 有条目被过滤掉:按"相邻的可见项"在**全量**列表里定位,
+            # 而不是拿可见下标硬插(那会落到隐藏项的位置上,顺序全乱)。
+            # 被过滤掉的条目自然保持原位。
+            after = new_vis[idx + 1] if idx + 1 < len(new_vis) else None
+            before = new_vis[idx - 1] if idx > 0 else None
+            if after is not None and after in others:
+                others.insert(others.index(after), mid)
+            elif before is not None and before in others:
+                others.insert(others.index(before) + 1, mid)
+            else:
+                others.append(mid)
+            self.models = others
+        if hasattr(self, "filtered"):
+            self.filtered = list(new_vis)
         if self.on_reorder:
             try:
                 self.on_reorder(list(self.models))
@@ -405,21 +431,28 @@ class ModelPanel(MacToplevel):
 
     def _wheel_enter(self, event):
         try:
-            self.canvas.bind_all("<MouseWheel>", self._on_wheel)
+            # 记 funcid,离开/关闭时只摘自己那一个;unbind_all(sequence)
+            # 会把 "all" tag 上该序列的所有绑定清掉,连面板的滚轮一起没
+            self._wheel_funcid = self.canvas.bind_all(
+                "<MouseWheel>", self._on_wheel, add="+")
         except tk.TclError:
             pass
 
     def _wheel_leave(self, event):
+        self._unbind_wheel()
+
+    def _unbind_wheel(self):
+        fid = getattr(self, "_wheel_funcid", None)
+        self._wheel_funcid = None
+        if fid is None:
+            return
         try:
-            self.canvas.unbind_all("<MouseWheel>")
+            self.canvas.unbind_all("<MouseWheel>", fid)
         except tk.TclError:
             pass
 
     def _on_close(self):
-        try:
-            self.canvas.unbind_all("<MouseWheel>")
-        except tk.TclError:
-            pass
+        self._unbind_wheel()
         self.destroy()
 
     def _attach_tooltip(self, widget, text, delay_ms=600):

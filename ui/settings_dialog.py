@@ -503,7 +503,11 @@ class SettingsDialog(MacToplevel):
         if self._wheel_bound:
             return
         try:
-            self._list_canvas.bind_all("<MouseWheel>", self._on_wheel, add="+")
+            # 记 funcid:unbind_all(sequence) 会清掉 "all" tag 上该序列的
+            # 全部绑定,包括面板行区的滚轮。设置窗口的列表一进一出,
+            # 面板的滚轮就没了。
+            self._wheel_funcid = self._list_canvas.bind_all(
+                "<MouseWheel>", self._on_wheel, add="+")
             self._wheel_bound = True
         except (tk.TclError, AttributeError):
             pass
@@ -511,8 +515,13 @@ class SettingsDialog(MacToplevel):
     def _wheel_leave(self, _event=None):
         if not self._wheel_bound:
             return
+        self._wheel_bound = False
+        fid = getattr(self, "_wheel_funcid", None)
+        self._wheel_funcid = None
+        if fid is None:
+            return
         try:
-            self.unbind_all("<MouseWheel>")
+            self.unbind_all("<MouseWheel>", fid)
         except tk.TclError:
             pass
         self._wheel_bound = False

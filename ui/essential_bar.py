@@ -13,9 +13,14 @@
 
 import time
 import tkinter as tk
+import weakref
 
 from ui.theme import PALETTE, Layout, usage_color, bind_theme_listener, to_tk_color, to_tk_color_blended
 from ui.fonts import fonts
+
+# 活着且还在跑 1Hz 定时器的 EssentialBar。测试之间由 conftest 统一
+# stop(),生产代码不需要读它。
+_LIVE_BARS = weakref.WeakSet()
 
 
 def _fmt_money(unit, value):
@@ -147,6 +152,8 @@ class EssentialBar:
 
         self._sig = None
         self._last_paint = None
+        self._tick_after_id = None
+        _LIVE_BARS.add(self)
 
         self.frame = tk.Frame(parent, bg=PALETTE.BG,
                               width=self.W, height=self.H,
@@ -287,12 +294,25 @@ class EssentialBar:
             pass
 
     def _tick(self):
+        self._tick_after_id = None
         try:
-            if self.frame.winfo_exists():
-                self._update()
-                self.frame.after(1000, self._tick)
+            if not self.frame.winfo_exists():
+                return
+            self._update()
+            self._tick_after_id = self.frame.after(1000, self._tick)
         except tk.TclError:
             pass
+
+    def stop(self):
+        """停掉 1Hz 定时器。条被移除/销毁前必须调用,否则残留的 after
+        回调会在解释器销毁后仍留在队列里,下一个事件循环会打到已销毁
+        的解释器上(Windows fatal exception)。"""
+        aid, self._tick_after_id = self._tick_after_id, None
+        if aid is not None:
+            try:
+                self.frame.after_cancel(aid)
+            except tk.TclError:
+                pass
 
     def _update(self):
         results = list(self.state.results or [])

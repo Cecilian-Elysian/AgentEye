@@ -383,7 +383,12 @@ def build_actions(root, cfg, state, stop, wake, poller=None):
             pass
 
     def probe_models(name):
-        """行菜单入口:对缓存模型列表的首个模型发 1-token 试调并弹结果。"""
+        """行菜单入口:对缓存模型列表的首个模型发 1-token 试调并弹结果。
+
+        真正的 HTTP 放在子线程里:这个函数是 tk.Menu 的 command 回调,
+        跑在 Tk 主线程上,同步发请求会把事件循环堵死最多 10s
+        (请求超时),表现为窗口停止重绘、倒计时停住、Windows 弹"未响应"。
+        """
         target = next((p for p in cfg.get("providers") or []
                        if p.get("name") == name), None)
         if not target:
@@ -398,10 +403,22 @@ def build_actions(root, cfg, state, stop, wake, poller=None):
             notify.alert("AgentEye", f"{name} 没有模型缓存,先查看模型列表")
             return
         model_id = models[0]
-        ok, latency, err = probe_model(model_id, base_url, key,
-                                       provider_name=name)
-        detail = f"{latency:.0f}ms" if ok else (err or "试调失败")
-        notify.alert("AgentEye", f"{name} · {model_id} · {detail}")
+
+        def worker():
+            try:
+                ok, latency, err = probe_model(model_id, base_url, key,
+                                               provider_name=name)
+                detail = f"{latency:.0f}ms" if ok else (err or "试调失败")
+                notify.alert("AgentEye", f"{name} · {model_id} · {detail}")
+            except Exception as e:
+                try:
+                    notify.alert("AgentEye", f"{name} 试调失败:"
+                                           f"{e.__class__.__name__}")
+                except Exception:
+                    pass
+
+        threading.Thread(target=worker, name=f"probe-{name}",
+                         daemon=True).start()
 
     def probe_model(model_id, base_url, key, timeout=10.0, provider_name=""):
         """1-token 试调:返回 (ok, latency_ms, error) 三元组。"""
