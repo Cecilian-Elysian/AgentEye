@@ -338,6 +338,9 @@ class Panel:
         toplevel.bind("<F5>", lambda e: actions["refresh_now"](), add="+")
         toplevel.bind("<Control-q>", lambda e: actions["quit"](), add="+")
         toplevel.bind("<Escape>", lambda e: self._close_any_popup(), add="+")
+        # 右键菜单必须绑 toplevel:子控件的 bindtags 含 toplevel、不含父
+        # Frame,绑在 root(=mac 模式的 standard_slot)上时面板体内点不到。
+        toplevel.bind("<Button-3>", self._popup_main_menu, add="+")
         # 拖动窗口只绑在 toplevel 上:mac 模式下 MacHeader 已经在拖,
         # 面板 body 不再抢,否则两套拖拽逻辑打架。
         if not is_frame:
@@ -347,7 +350,6 @@ class Panel:
                 w.bind("<ButtonRelease-1>", self._drag_end, add="+")
 
         self.menu = self._build_menu()
-        root.bind("<Button-3>", self._popup_main_menu, add="+")
         root.bind("<Map>", self._on_map, add="+")
 
         self._tick()
@@ -486,15 +488,26 @@ class Panel:
         return m
 
     def _popup_main_menu(self, event):
-        if event.widget is self.root:
-            paused = self.state.paused
-            self.menu.entryconfig(
-                self._pause_idx + 1,
-                label="恢复轮询" if paused else "暂停轮询")
+        # 行卡片自己绑了 <Button-3> 走行菜单,这里只接管其余区域。
+        # 门槛不能用 "event.widget is self.root":mac 模式下 self.root 是
+        # standard_slot(Frame),而子控件的 bindtags 只有
+        # "自身 → class → toplevel → all",不含父 Frame。绑在 slot 上时
+        # 面板体内几乎任何位置右键都到不了这里,只有 slot 自身那 10px
+        # 左边条能唤出菜单(README 承诺的 8 项入口实质不可达)。
+        if getattr(event.widget, "_provider_name", None):
+            return
+        paused = self.state.paused
+        self.menu.entryconfig(
+            self._pause_idx + 1,
+            label="恢复轮询" if paused else "暂停轮询")
+        try:
+            self.menu.tk_popup(event.x_root, event.y_root)
+        finally:
             try:
-                self.menu.tk_popup(event.x_root, event.y_root)
-            finally:
                 self.menu.grab_release()
+            except tk.TclError:
+                pass
+
 
     def _is_window_drag_target(self, widget):
         """root 绑定对所有子控件生效;交互控件按下时不启动窗口拖动。
@@ -659,10 +672,30 @@ class Panel:
                     pass
 
     def _close_any_popup(self):
-        for w in self.root.winfo_children():
-            if isinstance(w, tk.Toplevel):
-                w.destroy()
-                return
+        """Esc 关掉最上层的对话框。
+
+        对话框的 parent 是 Tk 根窗口,不是 self.root(mac 模式下 =
+        standard_slot),所以必须从 toplevel 往下找,否则 mac 模式
+        按 Esc 永远没反应。
+
+        走 wm_protocol 而不是直接 destroy:SettingsDialog._on_close_request
+        里会 unbind_all("<MouseWheel>"),直接 destroy 会跳过它,
+        之后整个应用的滚轮失效。
+        """
+        top = self.root_window or self.root
+        try:
+            tops = [w for w in top.winfo_children() if isinstance(w, tk.Toplevel)]
+        except tk.TclError:
+            return
+        if not tops:
+            return
+        # 最上层 = 栈里最后一个
+        dlg = tops[-1]
+        try:
+            dlg.wm_protocol("WM_DELETE_WINDOW")
+            dlg.destroy()
+        except tk.TclError:
+            pass
 
     def _on_rows_canvas_configure(self, event):
         try:
@@ -949,8 +982,12 @@ class Panel:
         for w in (card, top, name_lbl):
             w.bind("<Enter>", lambda e, ww=card: ww.config(bg=C["card_hover"]))
             w.bind("<Leave>", lambda e, ww=card: ww.config(bg=ww._bg))
-        value_lbl.bind("<Enter>", lambda e: value_lbl.config(fg=C["ok"]))
-        value_lbl.bind("<Leave>", lambda e: value_lbl.config(fg=C["dim"]))
+        # 悬停只改卡片底色,不改数值前景色:数值颜色是等级语义(红/黄/绿),
+        # 之前 <Leave> 把它写死成 dim,而 _paint_row 按签名去重不会再上色,
+        # 于是鼠标划过一次,critical/warn 行就永久变灰。
+        value_lbl.bind("<Enter>", lambda e, n=name: self._flash_value(n))
+        value_lbl.bind("<Leave>", lambda e, n=name: self._unflash_value(n))
+
 
         card.bind("<Button-3>", lambda e, n=name: self._popup_row_menu(e, n))
         name_lbl.bind("<Button-3>", lambda e, n=name: self._popup_row_menu(e, n))
@@ -1061,6 +1098,32 @@ class Panel:
         self._model_panel = ModelPanel(self.root, name, models, on_probe=_probe_cb,
                                        on_reorder=_on_reorder,
                                        on_after_reorder=lambda: self.actions["refresh_now"]())
+
+    def _value_color(self, name):
+        """当前行的数值应该是什么颜色(按等级实算,不缓存)。"""
+        for r in (self.state.results or []):
+            if r.get("name") == name:
+                return _usage_color(_usage_ratio(r))
+        return C["dim"]
+
+    def _flash_value(self, name):
+        """悬停:提亮数值。离开时必须回到等级色,不能写死 dim。"""
+        w = self._rows.get(name)
+        if not w:
+            return
+        try:
+            w["value"].config(fg=C["ok"])
+        except tk.TclError:
+            pass
+
+    def _unflash_value(self, name):
+        w = self._rows.get(name)
+        if not w:
+            return
+        try:
+            w["value"].config(fg=self._value_color(name))
+        except tk.TclError:
+            pass
 
     def _paint_row(self, widgets, r):
         ratio_val = _usage_ratio(r)

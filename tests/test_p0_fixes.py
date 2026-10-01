@@ -513,7 +513,155 @@ class TestActionWiringCompleteness(unittest.TestCase):
             f"panel.py 里这些 action 永远拿到兜底 no-op:{missing}")
 
 
+class TestNoUnresolvedNames(unittest.TestCase):
+    """静态检查:函数里读的每个全局名都必须真的存在。
+
+    P0-3 就是这么溜过去的:generic.fetch 写缓存时用了 base_url(实际
+    变量叫 base),NameError 被同行的 `except Exception` 吞掉,代码
+    永远不执行却全绿。测试再完善也挡不住这种,只能靠名字解析。
+    """
+
+    RUNTIME_SOURCES = [
+        "main.py", "config.py", "cache.py", "notify.py", "secure.py",
+        "providers/__init__.py", "providers/generic.py",
+        "providers/relay.py", "providers/minimax.py",
+        "providers/opencode_go.py", "providers/detect.py",
+        "providers/zhipu.py", "providers/deepseek.py",
+        "ui/panel.py", "ui/theme.py", "ui/app.py",
+    ]
+
+    def _resolve(self, path):
+        import builtins
+        import symtable
+        src = path.read_text(encoding="utf-8")
+        st = symtable.symtable(src, str(path), "exec")
+        module_names = set()
+        for s in st.get_symbols():
+            if s.is_assigned() or s.is_imported() or s.is_namespace():
+                module_names.add(s.get_name())
+        problems = []
+
+        def walk(table):
+            for sym in table.get_symbols():
+                name = sym.get_name()
+                if not sym.is_global() or sym.is_assigned():
+                    continue
+                if (name in module_names or hasattr(builtins, name)
+                        or name in ("__file__", "__name__", "__doc__",
+                                    "__package__", "__builtins__")):
+                    continue
+                problems.append(f"{path.name}:{table.get_name()}() 里的 {name}")
+            for child in table.get_children():
+                walk(child)
+
+        walk(st)
+        return problems
+
+    def test_no_unresolved_global_names(self):
+        root = Path(__file__).resolve().parent.parent
+        problems = []
+        for rel in self.RUNTIME_SOURCES:
+            p = root / rel
+            if not p.exists():
+                problems.append(f"源文件不存在:{rel}")
+                continue
+            problems.extend(self._resolve(p))
+        self.assertEqual(problems, [],
+                         "这些全局名在本模块里查不到定义(多半是拼写错误):"
+                         + "; ".join(problems))
+
+
+class TestLevelAlerting(unittest.TestCase):
+    """等级判定:任何能算出 pct 的 provider 都应该能告警。"""
+
+    CFG = {"alert": {"warn_pct": 30, "critical_amount_yuan": 5.0}}
+
+    def _lv(self, **res):
+        return providers._level(res, {}, self.CFG)
+
+    def test_dollar_provider_with_pct_can_warn(self):
+        # OpenCode Go:unit="$",pct=12(只剩 12%)。此前恒返回 ok。
+        self.assertEqual(self._lv(unit="$", pct=12.0, remaining=3.0), "warn")
+
+    def test_dollar_provider_healthy_stays_ok(self):
+        self.assertEqual(self._lv(unit="$", pct=80.0, remaining=60.0), "ok")
+
+    def test_opencode_go_style_result_warns(self):
+        res = {"unit": "$", "pct": 5.0, "remaining": 1.0, "used": None,
+               "total": None, "detail": "5h ≈$0.60/$12"}
+        self.assertEqual(providers._level(res, {}, self.CFG), "warn")
+
+    def test_yuan_uses_absolute_threshold(self):
+        self.assertEqual(self._lv(unit="¥", remaining=3.0), "critical")
+        self.assertEqual(self._lv(unit="¥", remaining=50.0), "ok")
+
+    def test_no_pct_stays_ok(self):
+        # 只报绝对金额的美元 provider:没有百分比就无从判断
+        self.assertEqual(self._lv(unit="$", remaining=3.0, pct=None), "ok")
+
+    def test_error_wins_over_thresholds(self):
+        self.assertEqual(self._lv(unit="$", pct=1.0, error="HTTP 500"),
+                         LEVEL_ERR)
+        self.assertEqual(self._lv(unit="$", pct=1.0, error="缺 key",
+                                  unconfigured=True), "unconfigured")
+
+
+LEVEL_ERR = providers.LEVEL_ERROR
+
+
+class TestOpencodeGoUrlFallback(unittest.TestCase):
+    """预设里的 base_url 不带 /zen/go,拼出来的 URL 会 404,必须回退。"""
+
+    def _resp(self, status, payload=None):
+        m = mock.Mock()
+        m.status_code = status
+        m.json.return_value = payload or {}
+        return m
+
+    def test_404_falls_back_to_module_constant(self):
+        from providers import opencode_go as oc
+        calls = []
+
+        def fake_get(url, headers=None, timeout=None):
+            calls.append(url)
+            if url == "https://opencode.ai/v1/usage":
+                return self._resp(404)
+            return self._resp(200, {"usage": {"rolling": {"percent": 40}}})
+
+        with mock.patch.object(oc.requests, "get", side_effect=fake_get):
+            res = oc.fetch({"base_url": "https://opencode.ai", "api_key": "ey-x"})
+        self.assertEqual(calls[0], "https://opencode.ai/v1/usage")
+        self.assertIn("zen/go", calls[-1])
+        self.assertNotIn("error", res)
+
+    def test_first_url_success_needs_no_fallback(self):
+        from providers import opencode_go as oc
+        calls = []
+
+        def fake_get(url, headers=None, timeout=None):
+            calls.append(url)
+            return self._resp(200, {"usage": {"rolling": {"percent": 40}}})
+
+        with mock.patch.object(oc.requests, "get", side_effect=fake_get):
+            oc.fetch({"base_url": "https://opencode.ai", "api_key": "ey-x"})
+        self.assertEqual(len(calls), 1)
+
+    def test_auth_error_does_not_retry_other_url(self):
+        from providers import opencode_go as oc
+        calls = []
+
+        def fake_get(url, headers=None, timeout=None):
+            calls.append(url)
+            return self._resp(401)
+
+        with mock.patch.object(oc.requests, "get", side_effect=fake_get):
+            res = oc.fetch({"base_url": "https://opencode.ai", "api_key": "ey-x"})
+        self.assertEqual(len(calls), 1, "401 不该去试别的端点")
+        self.assertIn("key 无效", res["error"])
+
+
 class TestThemeListenerTeardown(unittest.TestCase):
+
     """widget 销毁后主题监听器必须自动反注册,不能残留。"""
 
     def test_destroyed_widget_unregisters(self):

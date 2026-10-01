@@ -298,7 +298,14 @@ def build_actions(root, cfg, state, stop, wake):
         key = config_mod.plain_key(target)
         name = target.get("name") or pid
         cfg["providers"] = [p for p in providers if p.get("id") != pid]
-        _save()
+        if not _save():
+            # 配置没存上,下次启动这个 provider 还在。此时若清掉模型缓存
+            # 并写 provider_deleted 日志,用户会看到"已删除"提示,但数据
+            # 还在、缓存却没了,还得不到任何解释。回滚内存改动并停手。
+            cfg["providers"] = providers
+            notify.alert("AgentEye",
+                         f"删除 {name} 失败:配置未保存,{name} 仍保留")
+            return
         try:
             import cache as cache_mod
             if base_url and key:

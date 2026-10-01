@@ -181,11 +181,15 @@ def _one(kind, entry, cfg):
 
 
 def _level(res, entry, cfg):
-    """阈值简化版:只有 ¥ 临界和 % 警告会触发 warn/critical,其余保持 OK。
+    """阈值判定。
 
-    - ¥ 临界:cfg.alert.critical_amount_yuan(默认 5.0),低于 = critical
-    - % 警告:cfg.alert.warn_pct(默认 30),低于 = warn
-    - $ / 额度 / 其他:不再做阈值判断,保持 ok
+    - ¥ 绝对额:cfg.alert.critical_amount_yuan(默认 5.0),剩余低于它 = critical
+    - 有 pct 的(不论 unit 是 % 还是 $ / 额度):按 cfg.alert.warn_pct(默认 30)
+      判定,低于 = warn。**这一条不按 unit 白名单过滤** —— 之前只放行
+      unit == "%",于是所有美元计额的 provider(OpenCode Go、美元 DeepSeek、
+      中转站 new_api/usage)即使只剩 1% 也永远绿、永远不告警,而它们才是
+      主要监控对象。设置窗口与 README 的文案也一直写的是"剩余百分比"。
+    - 拿不到 pct 的(只报绝对金额的 $ provider):保持 ok
     """
     if res.get("error"):
         return "unconfigured" if res.get("unconfigured") else LEVEL_ERROR
@@ -197,10 +201,8 @@ def _level(res, entry, cfg):
         if remaining is None:
             return "ok"
         return "critical" if remaining <= crit else "ok"
-    if unit == "%":
+    pct = res.get("pct")
+    if pct is not None:
         warn = _num(alert.get("warn_pct"), 30.0)
-        pct = res.get("pct")
-        if pct is None:
-            return "ok"
         return "warn" if pct <= warn else "ok"
     return "ok"

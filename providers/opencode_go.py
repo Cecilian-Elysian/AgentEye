@@ -3,6 +3,13 @@ import requests
 TIMEOUT = 12
 URL = "https://opencode.ai/zen/go/v1/usage"
 
+# 候选端点:按顺序尝试,404/405/501 才换下一个。
+# 用户在 UI 预设里填的 base_url 不带 /zen/go,拼出来的是
+# https://opencode.ai/v1/usage(404),所以必须留一条回退到正确路径。
+URL_VARIANTS = (
+    "https://opencode.ai/zen/go/v1/usage",
+)
+
 WINDOWS = (
     ("rolling", "5h", 12.0),
     ("weekly", "周", 30.0),
@@ -20,26 +27,51 @@ def _norm_pct(v):
     return max(0.0, min(100.0, v))
 
 
+def _usage_urls(base):
+    """按顺序给出候选 usage URL。
+
+    预设/自动识别填的 base_url 是 https://opencode.ai,而真实端点在
+    /zen/go 下,直接拼 base + "/v1/usage" 会 404。这里把"按 base_url
+    拼的"和"模块常量"都列出来,由 fetch 按序重试,两种填法都能用。
+    """
+    base = (base or "").rstrip("/")
+    urls = []
+    if base:
+        urls.append(base if base.endswith("/usage") else base + "/v1/usage")
+    for u in URL_VARIANTS:
+        if u not in urls:
+            urls.append(u)
+    return urls
+
+
 def fetch(entry):
-    base = (entry.get("base_url") or URL).rstrip("/")
-    url = base if base.endswith("/usage") else base + "/v1/usage"
     key = entry.get("api_key") or ""
     if not key:
         return {"error": "未配置 api_key", "unconfigured": True}
 
-    try:
-        r = requests.get(
-            url,
-            headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
-            timeout=TIMEOUT,
-        )
-    except requests.RequestException as e:
-        return {"error": f"网络错误: {e.__class__.__name__}"}
-
-    if r.status_code in (401, 403):
-        return {"error": f"key 无效 (HTTP {r.status_code})"}
-    if r.status_code != 200:
-        return {"error": f"HTTP {r.status_code}"}
+    r = None
+    last_status = None
+    for url in _usage_urls(entry.get("base_url")):
+        try:
+            r = requests.get(
+                url,
+                headers={"Authorization": f"Bearer {key}",
+                         "Accept": "application/json"},
+                timeout=TIMEOUT,
+            )
+        except requests.RequestException as e:
+            return {"error": f"网络错误: {e.__class__.__name__}"}
+        if r.status_code in (401, 403):
+            return {"error": f"key 无效 (HTTP {r.status_code})"}
+        if r.status_code == 200:
+            break
+        last_status = r.status_code
+        r = None
+        if r is None and last_status not in (404, 405, 501):
+            # 只在"端点不存在"时才换下一个候选,其它状态码重试无意义
+            break
+    if r is None:
+        return {"error": f"HTTP {last_status}"}
 
     try:
         body = r.json()
