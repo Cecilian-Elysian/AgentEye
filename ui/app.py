@@ -217,15 +217,8 @@ class MacWindow:
                             pass
         except tk.TclError:
             pass
-        for view in (self.standard_attached, self.essential_attached):
-            if view is None:
-                continue
-            refresh = getattr(view, "refresh_palette", None)
-            if callable(refresh):
-                try:
-                    refresh(choice, palette, persist)
-                except Exception:
-                    pass
+        # attached views(Panel / EssentialBar)各自 bind_theme_listener
+        # 注册过,这里不再手动刷,否则同一个 view 一轮主题切换要重画两次
         self._apply_chrome()
 
     def attach_standard(self, view):

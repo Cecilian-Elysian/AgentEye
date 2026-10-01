@@ -100,9 +100,17 @@ class ConfirmDeleteDialog(MacToplevel):
         self.bind("<Return>", lambda e: self._do_confirm()
                   if str(self.confirm_btn["state"]) == "normal" else None)
 
-        self.grab_set()
+        # grab 不能在构造里立即调:窗口尚未 map 时抛
+        # "grab failed: window not viewable"。挂到 <Map>,映射后自动拿到
+        self.bind("<Map>", self._grab_when_viewable, add="+")
         self.focus_set()
         entry.focus_set()
+
+    def _grab_when_viewable(self, e=None):
+        try:
+            self.grab_set()
+        except tk.TclError:
+            pass
 
     def refresh_palette(self):
         try:
@@ -153,6 +161,10 @@ class ConfirmDeleteDialog(MacToplevel):
         if self._var.get() != self._expected:
             return
         cb = self._on_confirm
+        try:
+            self.grab_release()
+        except tk.TclError:
+            pass
         self.destroy()
         if cb:
             try:
@@ -161,4 +173,8 @@ class ConfirmDeleteDialog(MacToplevel):
                 pass
 
     def _cancel(self):
+        try:
+            self.grab_release()
+        except tk.TclError:
+            pass
         self.destroy()

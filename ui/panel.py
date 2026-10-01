@@ -551,6 +551,9 @@ class Panel:
                 return False
             if w.winfo_class() == "Button":
                 return False
+            if w.winfo_class() == "Scrollbar":
+                # 拖滚动条是把内容滚上去,不是把窗口拖走
+                return False
             w = getattr(w, "master", None)
         return True
 

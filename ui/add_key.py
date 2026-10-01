@@ -38,6 +38,10 @@ PRESETS = [
 
 FONT = "Microsoft YaHei UI"
 
+# 旧版本写死的占位灰。主题重刷时用来把还挂着旧色的控件归一到 DIM;
+# 新代码一律走 to_tk_color_blended(PALETTE.TEXT_DIM)。
+_LEGACY_PLACEHOLDER = "#8B8B9E"
+
 
 class AddKeyForm(tk.Frame):
     PROBE_TIMEOUT = 8.0
@@ -93,7 +97,7 @@ class AddKeyForm(tk.Frame):
                 w.configure(bg=BG)
             elif cls == "Label":
                 fg = str(w.cget("fg") or "").upper()
-                if fg in (DIM.upper(), "#8B8B9E"):
+                if fg in (DIM.upper(), _LEGACY_PLACEHOLDER):
                     w.configure(bg=BG, fg=DIM)
                 elif fg == OK.upper():
                     w.configure(bg=BG, fg=OK)
@@ -244,27 +248,30 @@ class AddKeyForm(tk.Frame):
     def _url_focus_in(self, e):
         if self._url_placeholder:
             self.url_entry.delete(0, "end")
-            self.url_entry.config(foreground="#e8e8f0")
+            self.url_entry.config(foreground=to_tk_color(PALETTE.TEXT))
             self._url_placeholder = False
 
     def _url_focus_out(self, e):
         if not self.url_var.get().strip():
             self.url_entry.delete(0, "end")
             self.url_entry.insert(0, "中转站可留空,其他建议填默认")
-            self.url_entry.config(foreground="#8b8b9e")
+            self.url_entry.config(
+                foreground=to_tk_color_blended(PALETTE.TEXT_DIM))
             self._url_placeholder = True
 
     def _key_focus_in(self, e):
         if self._key_placeholder:
             self.key_entry.delete(0, "end")
-            self.key_entry.config(foreground="#e8e8f0", show="•")
+            self.key_entry.config(foreground=to_tk_color(PALETTE.TEXT),
+                                  show="•")
             self._key_placeholder = False
 
     def _key_focus_out(self, e):
         if not self.key_var.get().strip():
             self.key_entry.delete(0, "end")
             self.key_entry.insert(0, "sk-... 粘贴 key")
-            self.key_entry.config(foreground="#8b8b9e", show="")
+            self.key_entry.config(
+                foreground=to_tk_color_blended(PALETTE.TEXT_DIM), show="")
             self._key_placeholder = True
 
     # ---------- 逻辑 ----------
@@ -274,7 +281,7 @@ class AddKeyForm(tk.Frame):
             self._url_focus_out(None)
         self.url_var.set(url)
         self._url_placeholder = False
-        self.url_entry.config(foreground="#e8e8f0")
+        self.url_entry.config(foreground=to_tk_color(PALETTE.TEXT))
         if not self.name_var.get().strip():
             self.name_var.set(label)
         self.key_entry.focus_set()

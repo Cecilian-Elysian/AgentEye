@@ -10,6 +10,9 @@ from ui.mac_toplevel import MacToplevel
 
 
 class ModelPanel(MacToplevel):
+    # 旧版本写死的搜索框底色,主题重刷时用来归一;新代码走 PALETTE.BAR_BG
+    _LEGACY_FIELD_BG = "#15151D"
+
     GROUP_RULES = [
         ("Claude", ("claude",)),
         ("GPT", ("gpt-", "o1", "o3", "o4")),
@@ -105,7 +108,9 @@ class ModelPanel(MacToplevel):
                   width=10).pack(side="right")
 
         self.bind("<Escape>", lambda e: self._on_close())
-        self.grab_set()
+        # grab 不能在构造里立即调:窗口尚未 map 时抛
+        # "grab failed: window not viewable"。挂到 <Map>,映射后自动拿到
+        self.bind("<Map>", self._grab_when_viewable, add="+")
         self.focus_set()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -138,7 +143,7 @@ class ModelPanel(MacToplevel):
             cls = w.winfo_class()
             if cls == "Frame":
                 cur_bg = str(w.cget("bg") or "")
-                if cur_bg.upper() == BG_FIELD.upper() or cur_bg.upper() == "#15151D":
+                if cur_bg.upper() in (BG_FIELD.upper(), _LEGACY_FIELD_BG):
                     w.configure(bg=BG_FIELD)
                 else:
                     w.configure(bg=BG)
@@ -313,7 +318,8 @@ class ModelPanel(MacToplevel):
         rows = [w for w in self.inner.pack_slaves()
                 if isinstance(w, tk.Frame) and hasattr(w, "_model_id")
                 and w._model_id != d["mid"]]
-        indicator = tk.Frame(self.inner, height=2, bg="#ff5d5d")
+        indicator = tk.Frame(self.inner, height=2,
+                             bg=to_tk_color(PALETTE.RED))
         d["indicator"] = indicator
         idx = d["target"]
         if idx < len(rows):
@@ -451,8 +457,18 @@ class ModelPanel(MacToplevel):
         except tk.TclError:
             pass
 
+    def _grab_when_viewable(self, e=None):
+        try:
+            self.grab_set()
+        except tk.TclError:
+            pass
+
     def _on_close(self):
         self._unbind_wheel()
+        try:
+            self.grab_release()
+        except tk.TclError:
+            pass
         self.destroy()
 
     def _attach_tooltip(self, widget, text, delay_ms=600):
@@ -469,7 +485,9 @@ class ModelPanel(MacToplevel):
             win = tk.Toplevel(self)
             win.wm_overrideredirect(True)
             win.wm_geometry(f"+{x}+{y}")
-            tk.Label(win, text=text, bg="#2a2a3a", fg="#e8e8f0",
+            tk.Label(win, text=text,
+                     bg=to_tk_color(PALETTE.CARD_HOVER),
+                     fg=to_tk_color(PALETTE.TEXT),
                      font=("Microsoft YaHei UI", 9), padx=8, pady=3,
                      relief="flat").pack()
             tip["win"] = win

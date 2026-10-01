@@ -46,6 +46,8 @@ KIND_LABELS = {
 }
 
 FONT = "Microsoft YaHei UI"
+# 旧版本写死的占位灰,主题重刷时用来归一;新代码走 TEXT_DIM
+_LEGACY_PLACEHOLDER = "#8B8B9E"
 BG = to_tk_color(PALETTE.BG)
 BG_FIELD = to_tk_color(PALETTE.BAR_BG)
 FG = to_tk_color(PALETTE.TEXT)
@@ -239,7 +241,7 @@ class SettingsDialog(MacToplevel):
                     fg = w.cget("fg")
                     if fg and isinstance(fg, str):
                         u = fg.upper()
-                        if u in (DIM.upper(), "#8B8B9E", "#8b8b9e"):
+                        if u in (DIM.upper(), _LEGACY_PLACEHOLDER):
                             w.configure(bg=BG, fg=DIM)
                         else:
                             w.configure(bg=BG, fg=FG)
@@ -248,7 +250,12 @@ class SettingsDialog(MacToplevel):
                 elif cls == "Entry":
                     w.configure(bg=BG_FIELD, fg=FG, insertbackground=FG)
                 elif cls == "Button":
-                    w.configure(bg=BTN_BG, fg=FG)
+                    if w is getattr(self, "_save_settings_btn", None):
+                        # 主按钮高亮底色,别被普通按钮的 BTN_BG 冲掉
+                        w.configure(bg=to_tk_color(PALETTE.CARD_PRESSED),
+                                    fg=FG)
+                    else:
+                        w.configure(bg=BTN_BG, fg=FG)
                 elif cls == "Radiobutton":
                     w.configure(bg=BG, fg=FG, selectcolor=BG_FIELD,
                                 activebackground=BG, activeforeground=FG)
@@ -318,7 +325,8 @@ class SettingsDialog(MacToplevel):
                   width=10).pack(side="right", padx=(8, 0))
         self._save_settings_btn = tk.Button(btn_frame, text="保存设置",
                                             command=self._save,
-                                            bg="#3a3a4a", fg=FG, relief="flat",
+                                            bg=to_tk_color(PALETTE.CARD_PRESSED),
+                                            fg=FG, relief="flat",
                                             font=(FONT, 10), width=10)
         self._save_settings_btn.pack(side="right")
 
