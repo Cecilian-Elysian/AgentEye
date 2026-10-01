@@ -76,15 +76,149 @@ class TestCorruptConfigQuarantine(ConfigPathMixin):
             encoding="utf-8")), future)
 
 
+class TestReadFailureIsNotCorruption(ConfigPathMixin):
+    """读不到 ≠ 文件损坏。OSError 绝不能触发隔离留证。"""
+
+    def test_transient_oserror_retries_then_succeeds(self):
+        v2 = {"schema_version": 2, "providers": [
+            {"id": "p1", "kind": "deepseek", "name": "DS",
+             "key": "sk-real", "base_url": "https://x"}]}
+        self._write(json.dumps(v2))
+        real = config_mod.CONFIG_PATH.read_text(encoding="utf-8")
+        calls = {"n": 0}
+
+        def flaky(*a, **kw):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise PermissionError(5, "被另一个进程占用")
+            return real
+
+        with mock.patch.object(config_mod.Path, "read_text", side_effect=flaky):
+            cfg = config_mod.load_v2()
+        self.assertEqual(cfg["providers"][0]["name"], "DS")
+        # 关键:一个损坏备份都不该产生
+        self.assertEqual(
+            list(Path(self.tmp.name).glob("config.json.corrupt-*")), [])
+
+    def test_persistent_oserror_raises_and_writes_nothing(self):
+        v2 = {"schema_version": 2, "providers": [
+            {"id": "p1", "kind": "deepseek", "name": "DS", "key": "sk-x"}]}
+        self._write(json.dumps(v2))
+        before = config_mod.CONFIG_PATH.read_text(encoding="utf-8")
+        with mock.patch.object(config_mod.Path, "read_text",
+                               side_effect=PermissionError(32, "文件被占用")):
+            with self.assertRaises(config_mod.ConfigError):
+                config_mod.load_v2()
+        # 原文件原地保留,没有被改名,也没有被覆盖
+        self.assertTrue(config_mod.CONFIG_PATH.exists())
+        self.assertEqual(config_mod.CONFIG_PATH.read_text(encoding="utf-8"),
+                         before)
+        self.assertEqual(
+            list(Path(self.tmp.name).glob("config.json.corrupt-*")), [])
+
+    def test_undecodable_bytes_still_quarantined(self):
+        """字节流真的坏了仍走隔离留证(那是真损坏)。"""
+        config_mod.CONFIG_PATH.write_bytes(b"\xff\xfe\x00garbage")
+        cfg = config_mod.load_v2()
+        self.assertEqual(cfg.get("providers"), [])
+        quarantined = list(Path(self.tmp.name).glob("config.json.corrupt-*"))
+        self.assertEqual(len(quarantined), 1)
+
+
+class TestProvidersShapeNormalization(ConfigPathMixin):
+    """手改配置可能塞进非对象条目,必须归一而不是每次启动崩掉。"""
+
+    def _load(self, providers_value):
+        self._write(json.dumps({"schema_version": 2,
+                                "providers": providers_value}))
+        return config_mod.load_v2()
+
+    def test_null_member_is_dropped(self):
+        cfg = self._load([None, {"id": "p1", "kind": "deepseek", "name": "DS"}])
+        self.assertEqual(len(cfg["providers"]), 1)
+        self.assertEqual(cfg["providers"][0]["name"], "DS")
+
+    def test_all_non_dict_members(self):
+        cfg = self._load(["a", 3, None])
+        self.assertEqual(cfg["providers"], [])
+
+    def test_providers_as_single_dict(self):
+        cfg = self._load({"id": "p1", "kind": "deepseek", "name": "DS"})
+        self.assertEqual(len(cfg["providers"]), 1)
+        self.assertEqual(cfg["providers"][0]["name"], "DS")
+
+    def test_providers_wrong_type_becomes_empty_list(self):
+        cfg = self._load("nope")
+        self.assertEqual(cfg["providers"], [])
+
+
+class TestExitCodes(unittest.TestCase):
+    """AGENTS.md 退出码契约:2 必须真的可达。"""
+
+    def test_config_version_error_returns_2(self):
+        import main as main_mod
+        with mock.patch.object(
+                main_mod, "main",
+                side_effect=config_mod.ConfigVersionError("版本 3 太高")):
+            self.assertEqual(main_mod._run(), 2)
+
+    def test_config_error_returns_2(self):
+        import main as main_mod
+        with mock.patch.object(
+                main_mod, "main",
+                side_effect=config_mod.ConfigError("文件被占用")):
+            self.assertEqual(main_mod._run(), 2)
+
+    def test_generic_error_returns_1(self):
+        import main as main_mod
+        with mock.patch.object(main_mod, "main", side_effect=RuntimeError("x")):
+            self.assertEqual(main_mod._run(), 1)
+
+    def test_plaintext_key_error_is_also_config_error(self):
+        import main as main_mod
+        self.assertTrue(issubclass(config_mod.PlaintextKeyError,
+                                   config_mod.ConfigError))
+        with mock.patch.object(
+                main_mod, "main",
+                side_effect=config_mod.PlaintextKeyError("拒绝写盘")):
+            self.assertEqual(main_mod._run(), 2)
+
+
 class TestV1MigrationBacksUpFirst(ConfigPathMixin):
-    def test_migration_creates_backup(self):
+    def test_migration_creates_encrypted_backup(self):
         v1 = {"deepseek_keys": ["sk-old"], "refresh_interval_sec": 45}
         self._write(json.dumps(v1))
         cfg = config_mod.load_v2()
         backup = config_mod.CONFIG_PATH.with_suffix(".v1.bak")
         self.assertTrue(backup.exists(), "迁移前必须先落一份 v1 备份")
-        self.assertEqual(json.loads(backup.read_text(encoding="utf-8")), v1)
-        self.assertEqual(cfg.get("schema_version"), 2)
+        raw = backup.read_text(encoding="utf-8")
+        # 备份里绝不能出现明文密钥
+        self.assertNotIn("sk-old", raw)
+        data = json.loads(raw)
+        self.assertIn(config_mod.V1_BACKUP_MARK, data)
+        # 且备份内容确实可还原
+        self.assertEqual(config_mod.restore_v1_backup(), v1)
+
+    def test_backup_is_restorable_after_migration(self):
+        v1 = {"deepseek_keys": ["sk-a", "sk-b"], "refresh_interval_sec": 45}
+        self._write(json.dumps(v1))
+        config_mod.load_v2()
+        self.assertEqual(config_mod.restore_v1_backup()["deepseek_keys"],
+                         ["sk-a", "sk-b"])
+
+    def test_no_backup_when_dpapi_unavailable(self):
+        """DPAPI 不可用时宁可中止迁移,也不能写出明文备份。"""
+        v1 = {"deepseek_keys": ["sk-old"]}
+        self._write(json.dumps(v1))
+        with mock.patch("secure.is_available", return_value=False):
+            with self.assertRaises(config_mod.ConfigError):
+                config_mod.load_v2()
+        backup = config_mod.CONFIG_PATH.with_suffix(".v1.bak")
+        self.assertFalse(backup.exists(), "中止时不应留下备份")
+        # 原配置原封不动
+        self.assertEqual(json.loads(
+            config_mod.CONFIG_PATH.read_text(encoding="utf-8")), v1)
+
 
 
 class TestEnvKeyNeverHitsDisk(ConfigPathMixin):

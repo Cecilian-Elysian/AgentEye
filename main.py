@@ -491,6 +491,16 @@ def _run():
                 "当前 Python 未包含 tkinter,换官方安装包重装\n")
             return EXIT_NO_TK
         raise
+    except config_mod.ConfigVersionError as e:
+        # 配置来自更新版本,不是"崩溃"。走独立退出码,让 run.bat 之类的
+        # 启动器能区分"该升级"和"程序坏了"。
+        sys.stderr.write(f"{e}\n")
+        return EXIT_CONFIG
+    except config_mod.ConfigError as e:
+        # 配置存在但读不了/不合规。为避免覆盖用户数据,这里直接退出,
+        # 不做任何写入。
+        sys.stderr.write(f"配置问题:{e}\n")
+        return EXIT_CONFIG
     except Exception as e:
         sys.stderr.write(f"启动失败:{e.__class__.__name__}: {e}\n")
         return EXIT_ERROR

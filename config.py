@@ -265,11 +265,46 @@ def clamp_interval_v2(cfg):
     return max(15, min(3600, sec))
 
 
+def normalize_providers(cfg):
+    """把 providers 归一成"list[dict]",丢弃并报告非法成员。
+
+    config.json 是允许手改的(菜单里就有"打开配置文件"),所以
+    `"providers": [null]`、`["x"]`、甚至 `{}` 都可能出现在磁盘上。
+    merge_v2_defaults 是整体赋值,不会纠正形状;下游任何一处
+    `p.get("kind")` 都会 AttributeError,表现成"每次启动都崩"。
+    """
+    raw = cfg.get("providers")
+    if raw is None:
+        cfg["providers"] = []
+        return cfg
+    if isinstance(raw, dict):
+        raw = [raw]                      # 少写个中括号,当单条处理
+    if not isinstance(raw, list):
+        sys.stderr.write(
+            f"配置里 providers 不是列表(实际 {type(raw).__name__}),已置空\n")
+        cfg["providers"] = []
+        return cfg
+    good, bad = [], 0
+    for p in raw:
+        if isinstance(p, dict):
+            good.append(p)
+        else:
+            bad += 1
+    if bad:
+        sys.stderr.write(
+            f"配置里 providers 有 {bad} 个非对象条目,已丢弃"
+            "(provider 必须是 {...} 对象)\n")
+    cfg["providers"] = good
+    return cfg
+
+
 def apply_env_v2(cfg):
     """v2 schema 环境变量覆盖。必须在 _decrypt_providers **之后**调用,
     否则磁盘里解出来的 key 会把 env 覆盖回去,环境变量形同虚设。"""
     env_map = ENV_DEFAULTS
     for p in cfg.get("providers") or []:
+        if not isinstance(p, dict):      # 手改配置可能塞进非 dict
+            continue
         kind = p.get("kind")
         env_name = p.get("api_key_env") or env_map.get(kind)
         if env_name and os.environ.get(env_name):
@@ -299,15 +334,95 @@ def _quarantine_corrupt_config(reason):
         return None
 
 
+V1_BACKUP_MARK = "agenteye.v1.bak"
+
+
+def _backup_v1_encrypted(user_cfg):
+    """迁移前把 v1 原文加密存成 config.json.v1.bak。
+
+    v1 的 key 是明文数组,直接 atomic_save 会在用户目录永久留下
+    一份 sk- 明文,且这份备份比迁移后的配置活得更久(用户之后每次
+    改配置都不会动它)。所以整个文档走 DPAPI 加密后再落盘。
+
+    DPAPI 不可用时不能退回明文:宁可中止迁移(配置原封不动),
+    也不能为了迁移而在磁盘上写出明文密钥。
+    """
+    backup = CONFIG_PATH.with_suffix(".v1.bak")
+    if backup.exists():
+        return
+    try:
+        import secure
+    except Exception as e:
+        raise ConfigError(f"secure 不可用,已中止 v1 迁移({e})") from e
+    if not secure.is_available():
+        raise ConfigError(
+            "DPAPI 不可用,已中止 v1 迁移:备份会写出明文密钥")
+    blob = json.dumps(user_cfg, ensure_ascii=False)
+    enc = secure.protect(blob)
+    if not enc:
+        raise ConfigError("v1 备份加密失败,已中止迁移:不愿写出明文密钥")
+    try:
+        atomic_save(backup, {V1_BACKUP_MARK: enc})
+    except OSError as e:
+        raise ConfigError(
+            f"无法写入 v1 备份({e}),已中止迁移以免密钥丢失") from e
+
+
+def restore_v1_backup():
+    """读回并解密 config.json.v1.bak(解密失败时抛 ConfigError)。"""
+    backup = CONFIG_PATH.with_suffix(".v1.bak")
+    if not backup.exists():
+        raise ConfigError(f"没有备份文件:{backup}")
+    data = json.loads(backup.read_text(encoding="utf-8"))
+    enc = data.get(V1_BACKUP_MARK)
+    if not enc:
+        raise ConfigError(f"{backup} 不是本程序写的加密备份")
+    import secure
+    raw = secure.unprotect(enc)
+    if not raw:
+        raise ConfigError(
+            f"{backup} 解密失败:DPAPI 绑定当前用户,换账户/换机器无法恢复")
+    return json.loads(raw)
+
+
+READ_RETRIES = 3
+READ_RETRY_DELAY = 0.15
+
+
+def _read_config_text():
+    """读配置原文,失败时区分"内容坏了"和"暂时读不到"。
+
+    - OSError(杀软/OneDrive/开了第二个实例/编辑器锁)先重试,仍失败
+      抛 ConfigError。**这类情况绝不能当损坏处理**:文件是好的,
+      改名留证等于把用户仅有的配置挪走,随后空模板还会覆盖它。
+    - 只有 UnicodeDecodeError(字节流坏)才按损坏处理。
+    """
+    last = None
+    for attempt in range(READ_RETRIES):
+        try:
+            return CONFIG_PATH.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            raise                      # 内容真的坏了,重试无意义
+        except OSError as e:
+            last = e
+            if attempt < READ_RETRIES - 1:
+                time.sleep(READ_RETRY_DELAY * (attempt + 1))
+    raise ConfigError(
+        f"无法读取配置文件 {CONFIG_PATH}({last.__class__.__name__}: {last})。"
+        "请关闭正在占用它的程序(记事本/编辑器/另一个 AgentEye 实例)后重试;"
+        "为避免覆盖你的配置,本次不做任何写入。")
+
+
 def load_v2():
     """加载 v2 配置。
 
-    三条硬性要求:
+    四条硬性要求:
     - 文件损坏 ≠ 首次运行。损坏时把原文改名留证并**不写盘**,
       绝不能让 save_v2 用空模板盖掉用户仅有的 provider 与 key。
+    - 读不到(OSError)≠ 损坏。重试后仍读不到就报错退出,不碰磁盘。
     - schema_version 高于 2 时抛 ConfigVersionError,不能当 v1 迁移
       (那会把 providers[] 清成空数组再写回)。
-    - 迁移前必须先成功备份 v1 原文。
+    - 迁移前必须先成功备份 v1 原文,且备份本身是加密的。
     """
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not CONFIG_PATH.exists():
@@ -317,8 +432,8 @@ def load_v2():
         return v2
 
     try:
-        user_cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except (ValueError, OSError) as e:
+        user_cfg = json.loads(_read_config_text())
+    except ValueError as e:
         moved = _quarantine_corrupt_config(str(e))
         sys.stderr.write(
             f"config.json 解析失败({e}),已保留为 {moved or '(重命名失败)'}\n"
@@ -334,6 +449,7 @@ def load_v2():
     version = user_cfg.get("schema_version")
     if version == 2:
         merged = merge_v2_defaults(copy.deepcopy(V2_TEMPLATE), user_cfg)
+        normalize_providers(merged)
         # 顺序要紧:先解密成明文,再让环境变量覆盖,否则 env 永远不生效
         _decrypt_providers(merged.get("providers") or [])
         apply_env_v2(merged)
@@ -345,14 +461,9 @@ def load_v2():
             "请升级 AgentEye,或手动改回 2。")
 
     # 只有缺版本号 / 1 才走 v1 迁移
-    backup = CONFIG_PATH.with_suffix(".v1.bak")
-    if not backup.exists():
-        try:
-            atomic_save(backup, user_cfg)
-        except OSError as e:
-            raise ConfigError(
-                f"无法备份 v1 配置({e}),已中止迁移以免密钥丢失") from e
+    _backup_v1_encrypted(user_cfg)
     migrated = migrate_v1_to_v2(user_cfg)
+    normalize_providers(migrated)
     _decrypt_providers(migrated.get("providers") or [])
     apply_env_v2(migrated)
     save_v2(migrated)
