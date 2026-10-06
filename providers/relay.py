@@ -64,6 +64,7 @@ def fetch(entry):
         headers = {"Authorization": f"Bearer {auth_token}", "Accept": "application/json"}
         headers.update(extra_headers)
 
+        saw_401 = False
         for kind, path in CANDIDATES:
             if use_access_token and kind == "new_api":
                 continue
@@ -77,6 +78,12 @@ def fetch(entry):
                     _TOKEN_CACHE.pop(_cache_key(base, email), None)
                 relogged = True
                 break
+            if r.status_code == 401:
+                # 静态 token / 重登后仍 401:记住,最后统一给"key 无效",
+                # 别让用户面对一串 "HTTP 401" 不知道该换 token
+                saw_401 = True
+                errors.append(f"{path}: HTTP 401")
+                continue
             if r.status_code != 200:
                 errors.append(f"{path}: HTTP {r.status_code}")
                 continue
@@ -86,11 +93,17 @@ def fetch(entry):
                 errors.append(f"{path}: 非JSON")
                 continue
             parsed = _parse(kind, body, entry)
-            if parsed:
+            if parsed is not None:
+                if parsed.get("error"):
+                    # _parse 主动给出的结论(如 key 无效)直接透传,
+                    # 不加 detail 前缀、不再试后续端点
+                    return parsed
                 parsed["detail"] = f"[{path}] {parsed.get('detail', '')}".strip()
                 return parsed
             errors.append(f"{path}: 结构未识别")
         else:
+            if saw_401:
+                return {"error": "key 无效 (HTTP 401)"}
             return {"error": "; ".join(errors[:3])}
 
         if relogged:
@@ -143,8 +156,13 @@ def _parse(kind, body, entry):
 
 
 def _parse_key_usage(body, entry):
-    if body.get("isValid") is False:
+    if not isinstance(body, dict):
+        # 200 但返回 list/标量的异常站点:别让 .get 抛 AttributeError
         return None
+    if body.get("isValid") is False:
+        # 端点明确说 key 无效:直接给结论,别让用户面对一串
+        # "结构未识别"去猜是不是该换 key
+        return {"error": "key 无效 (isValid=false)"}
     remaining = body.get("balance", body.get("remaining"))
     if remaining is None:
         return None
@@ -197,6 +215,9 @@ def _parse_key_usage(body, entry):
 
 
 def _parse_new_api(body, entry):
+    if not isinstance(body, dict):
+        # 200 但返回 list/标量的异常站点:别让 .get 抛 AttributeError
+        return None
     if body.get("success") is False:
         return None
     data = body.get("data") if isinstance(body.get("data"), dict) else body
@@ -226,25 +247,19 @@ def _parse_new_api(body, entry):
 
 
 def _parse_generic(body, entry):
-    items = body if isinstance(body, list) else [body]
-    sum_remaining = 0.0
-    sum_used = 0.0
-    sum_total = 0.0
-    found = False
-    key_count = 0
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        key_count += 1
-        rem = _deep_find(item, REMAINING_KEYS)
-        if rem is None:
-            continue
-        found = True
-        sum_remaining += rem
-        sum_used += _deep_find(item, USED_KEYS) or 0
-        sum_total += _deep_find(item, TOTAL_KEYS) or 0
-    if not found:
+    if not isinstance(body, (dict, list)):
+        # 200 但返回 list/标量的异常站点:别让 .get 抛 AttributeError
         return None
+    # 多 key 站点的 {"success":true,"data":[...]} 包装在这里是
+    # "单元素 items 套 list":用 _deep_sum 聚合全部命中,而不是
+    # 首中即返只算第一个 key(额度被低估数倍且无"N 个 key"提示)
+    key_count = _deep_count(body, REMAINING_KEYS)
+    if key_count <= 0:
+        return None
+    sum_remaining = _deep_sum(body, REMAINING_KEYS)
+    sum_used = _deep_sum(body, USED_KEYS)
+    sum_total = _deep_sum(body, TOTAL_KEYS)
+    found = True
     # one-api 系站点的 quota 是"内部点数";配置了 quota_per_usd 才知道
     # 多少点等于 1 美元,换算成 $ 展示。没配就按原样当"额度"数。
     per_usd = None
@@ -319,3 +334,49 @@ def _deep_find(obj, keys, depth=0):
             if hit is not None:
                 return hit
     return None
+
+
+def _deep_sum(obj, keys, depth=0):
+    """与 _deep_find 同样的遍历,但把**所有**命中求和。
+
+    背景:{"success":true,"data":[{...},{...}]} 是 /api/v1/keys 类端点
+    的标准包装,多 key 中转站的响应体在这里是"单元素 list 套 list"。
+    _deep_find 首中即返,只统计到第一个 key 的剩余,额度被大幅低估,
+    连"N 个 key"的提示都不会出现。
+    """
+    if depth > 6:
+        return 0.0
+    total = 0.0
+    if isinstance(obj, dict):
+        data = obj.get("data")
+        if isinstance(data, (dict, list)):
+            total += _deep_sum(data, keys, depth + 1)
+        for k in keys:
+            v = obj.get(k)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                total += float(v)
+                break
+        for v in obj.values():
+            if isinstance(v, dict):
+                total += _deep_sum(v, keys, depth + 1)
+    elif isinstance(obj, list):
+        for item in obj[:50]:
+            total += _deep_sum(item, keys, depth + 1)
+    return total
+
+
+def _deep_count(obj, keys, depth=0):
+    """统计列表容器里有几个条目命中 keys(用于"N 个 key"提示)。"""
+    if depth > 6:
+        return 0
+    if isinstance(obj, list):
+        return sum(1 for el in obj[:50]
+                   if _deep_find(el, keys) is not None)
+    if isinstance(obj, dict):
+        data = obj.get("data")
+        if isinstance(data, (dict, list)):
+            n = _deep_count(data, keys, depth + 1)
+            if n:
+                return n
+        return 1 if _deep_find(obj, keys) is not None else 0
+    return 0

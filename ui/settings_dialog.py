@@ -459,19 +459,23 @@ class SettingsDialog(MacToplevel):
         return names
 
     def _handle_entry_saved(self, entry):
-        """表单保存 → 回调宿主写 cfg(新增或更新)→ 回到列表模式。"""
-        if self._editing_id:
-            if self._on_update_provider:
-                try:
+        """表单保存 → 回调宿主写 cfg(新增或更新)→ 回到列表模式。
+
+        宿主写盘失败(ConfigError 族)时弹错并留在表单:原先异常被
+        吞掉还照样切回列表,用户以为存上了,实际配置文件根本没写。
+        """
+        try:
+            if self._editing_id:
+                if self._on_update_provider:
                     self._on_update_provider(self._editing_id, entry)
-                except Exception:
-                    pass
-        else:
-            if self._on_add_key:
-                try:
+            else:
+                if self._on_add_key:
                     self._on_add_key(entry)
-                except Exception:
-                    pass
+        except Exception as e:
+            if self.winfo_exists():
+                messagebox.showerror(
+                    "保存失败", str(e) or e.__class__.__name__, parent=self)
+            return
         if self.winfo_exists():
             self._swap_center_list()
 

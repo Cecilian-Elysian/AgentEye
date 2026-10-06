@@ -98,5 +98,61 @@ class PresetList(unittest.TestCase):
                                  "opencode_go", "relay"})
 
 
+class ProbeRaceGuard(unittest.TestCase):
+    """探测竞态:在途探测返回的旧结果不得放行新 key 的保存。
+
+    背景:_schedule_probe 在探测线程存活时直接 return,用户改了 key
+    之后,旧探测完成仍按旧输入启用保存按钮、展示旧预览。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls._root = tk.Tk()
+        cls._root.withdraw()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._root.destroy()
+
+    def _make_form(self):
+        f = mock.MagicMock()
+        f.url_var = tk.StringVar()
+        f.key_var = tk.StringVar()
+        f.name_var = tk.StringVar()
+        f._url_placeholder = False
+        f._key_placeholder = False
+        f._probe_thread = None
+        return f
+
+    _DETECTED = {"kind": "generic_openai", "confidence": "low",
+                 "base_url": "", "notes": "n"}
+
+    def test_stale_result_reschedules_probe(self):
+        f = self._make_form()
+        f.key_var.set("sk-new-key")
+        f._probe_input = ("sk-old-key", "")
+        f._probe_pending = False
+        ak.AddKeyForm._probe_done(f, self._DETECTED, {"error": "x"}, 0.1)
+        self.assertTrue(f._schedule_probe.called,
+                        "输入已变化必须自动重排探测,不得用旧结果放行保存")
+
+    def test_fresh_result_does_not_reschedule(self):
+        f = self._make_form()
+        f.key_var.set("sk-key")
+        f._probe_input = ("sk-key", "")
+        f._probe_pending = False
+        ak.AddKeyForm._probe_done(f, self._DETECTED, {"error": "x"}, 0.1)
+        self.assertFalse(f._schedule_probe.called)
+
+    def test_pending_flag_reschedules(self):
+        f = self._make_form()
+        f.key_var.set("sk-key")
+        f._probe_input = ("sk-key", "")
+        f._probe_pending = True
+        ak.AddKeyForm._probe_done(f, self._DETECTED, {"error": "x"}, 0.1)
+        self.assertTrue(f._schedule_probe.called,
+                        "探测期间排队过的修改必须补一轮探测")
+
+
 if __name__ == "__main__":
     unittest.main()

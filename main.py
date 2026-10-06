@@ -7,10 +7,11 @@ import uuid
 import config as config_mod
 import notify
 import cache as cache_mod
-from providers import fetch_all
-from ui import Panel
-from ui.app import MacWindow
-from ui.essential_bar import EssentialBar
+
+# 注意:providers(ui 各模块同理)顶层 import 会连带 import requests /
+# tkinter。这里的 import 全部下沉到 Poller.fetch_once / main() 内部,
+# 否则缺依赖时 ModuleNotFoundError 在 _run() 的守卫之前就炸,
+# 退出码 3/4 永远不可达(AGENTS.md 退出码契约)。
 
 
 class State:
@@ -75,6 +76,9 @@ class Poller(threading.Thread):
     def fetch_once(self):
         self.state.fetching = True
         try:
+            # 延迟导入:顶层 import providers 会连带 import requests,
+            # 抢在 _run() 的缺依赖守卫之前炸(见文件头说明)
+            from providers import fetch_all
             # 传 stop:退出时 fetch_all 不再等在途请求(那些是 daemon 线程,
             # 解释器退出不 join 它们),关窗后进程立刻消失
             results = fetch_all(self.cfg,
@@ -140,14 +144,10 @@ def build_actions(root, cfg, state, stop, wake, poller=None):
     actions = {}
 
     def refresh_now():
+        if state.fetching:
+            return
         state.fetching = True
         wake.set()
-        flash = actions.get("flash_refresh")
-        if flash:
-            try:
-                flash()
-            except Exception:
-                pass
 
     def toggle_pause():
         state.paused = not state.paused
@@ -292,7 +292,15 @@ def build_actions(root, cfg, state, stop, wake, poller=None):
             "extra": {},
         }
         cfg.setdefault("providers", []).append(new_provider)
-        _save()
+        if not _save():
+            # 写盘失败不能把半截条目留在内存:重试会出现两条同名
+            # provider。_save 已 toast 并记入 save_error,这里再抛回
+            # 去让设置对话框弹错、留在表单,而不是假装添加成功
+            try:
+                cfg["providers"].remove(new_provider)
+            except ValueError:
+                pass
+            raise config_mod.ConfigError(state.save_error or "配置写入失败")
         try:
             import notify as notify_mod
             notify_mod.alert("AgentEye", f"已添加:{new_provider['name']}")
@@ -420,6 +428,16 @@ def build_actions(root, cfg, state, stop, wake, poller=None):
         threading.Thread(target=worker, name=f"probe-{name}",
                          daemon=True).start()
 
+    def _probe_log(provider_name, model_id, ok, latency_ms, error=""):
+        # 失败也要落审计日志:删除确认文案承诺"试调日志保留",
+        # 只有成功记录的日志对排查 key 失效毫无用处
+        try:
+            cache_mod.log_probe(provider_name=provider_name,
+                                model_id=model_id, success=ok,
+                                latency_ms=latency_ms, error=error)
+        except Exception:
+            pass
+
     def probe_model(model_id, base_url, key, timeout=10.0, provider_name=""):
         """1-token 试调:返回 (ok, latency_ms, error) 三元组。"""
         import requests
@@ -438,17 +456,18 @@ def build_actions(root, cfg, state, stop, wake, poller=None):
             )
             latency = (time.time() - t0) * 1000
         except requests.RequestException as e:
+            _probe_log(provider_name, model_id, False, 0.0,
+                       str(e.__class__.__name__))
             return False, 0.0, str(e.__class__.__name__)
         if r.status_code in (401, 403):
-            return False, latency, f"key 无效 (HTTP {r.status_code})"
+            err = f"key 无效 (HTTP {r.status_code})"
+            _probe_log(provider_name, model_id, False, latency, err)
+            return False, latency, err
         if r.status_code != 200:
-            return False, latency, f"HTTP {r.status_code}"
-        import cache
-        try:
-            cache.log_probe(provider_name=provider_name, model_id=model_id,
-                            success=True, latency_ms=latency)
-        except Exception:
-            pass
+            err = f"HTTP {r.status_code}"
+            _probe_log(provider_name, model_id, False, latency, err)
+            return False, latency, err
+        _probe_log(provider_name, model_id, True, latency)
         return True, latency, ""
 
     return {
@@ -467,6 +486,9 @@ def build_actions(root, cfg, state, stop, wake, poller=None):
         "save_model_order": save_model_order,
         "quit": quit_app,
         "add_key": add_key,
+        # 设置对话框 on_add_key 回调的同一入口;放进来一是给测试与
+        # 接线守卫用,二是它是唯一会改 providers 数组的外部入口
+        "add_key_entry": add_key_entry,
         "edit_provider": edit_provider,
         "update_provider": update_provider,
         "pause_provider": pause_provider,
@@ -493,6 +515,11 @@ def main():
     poller.start()
 
     import tkinter as tk
+
+    # 延迟导入:同文件头说明,缺 tkinter/依赖坏时让 _run() 的守卫先接住
+    from ui import Panel
+    from ui.app import MacWindow
+    from ui.essential_bar import EssentialBar
 
     root = tk.Tk()
     actions = build_actions(root, cfg, state, stop, wake, poller=poller)
@@ -534,29 +561,34 @@ def _run():
     try:
         import requests  # noqa: F401
     except ImportError:
-        sys.stderr.write(
-            "缺少依赖 requests,先执行 pip install -r requirements.txt\n")
+        if sys.stderr:
+            sys.stderr.write(
+                "缺少依赖 requests,先执行 pip install -r requirements.txt\n")
         return EXIT_NO_REQUESTS
     try:
         main()
     except ImportError as e:
         if "tkinter" in str(e):
-            sys.stderr.write(
-                "当前 Python 未包含 tkinter,换官方安装包重装\n")
+            if sys.stderr:
+                sys.stderr.write(
+                    "当前 Python 未包含 tkinter,换官方安装包重装\n")
             return EXIT_NO_TK
         raise
     except config_mod.ConfigVersionError as e:
         # 配置来自更新版本,不是"崩溃"。走独立退出码,让 run.bat 之类的
         # 启动器能区分"该升级"和"程序坏了"。
-        sys.stderr.write(f"{e}\n")
+        if sys.stderr:
+            sys.stderr.write(f"{e}\n")
         return EXIT_CONFIG
     except config_mod.ConfigError as e:
         # 配置存在但读不了/不合规。为避免覆盖用户数据,这里直接退出,
         # 不做任何写入。
-        sys.stderr.write(f"配置问题:{e}\n")
+        if sys.stderr:
+            sys.stderr.write(f"配置问题:{e}\n")
         return EXIT_CONFIG
     except Exception as e:
-        sys.stderr.write(f"启动失败:{e.__class__.__name__}: {e}\n")
+        if sys.stderr:
+            sys.stderr.write(f"启动失败:{e.__class__.__name__}: {e}\n")
         return EXIT_ERROR
     return EXIT_OK
 

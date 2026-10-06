@@ -14,6 +14,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 import main as main_mod
+import providers as providers_mod
 
 
 def _poller(cfg=None):
@@ -38,7 +39,7 @@ class TestSafeFetchOnce(unittest.TestCase):
 
     def test_records_error_and_keeps_state(self):
         p = _poller()
-        with mock.patch.object(main_mod, "fetch_all",
+        with mock.patch.object(providers_mod, "fetch_all",
                                side_effect=RuntimeError("炸了")):
             p._safe_fetch_once()
         self.assertEqual(p.state.poll_error, "RuntimeError: 炸了")
@@ -46,12 +47,12 @@ class TestSafeFetchOnce(unittest.TestCase):
 
     def test_error_cleared_on_next_success(self):
         p = _poller()
-        with mock.patch.object(main_mod, "fetch_all",
+        with mock.patch.object(providers_mod, "fetch_all",
                                side_effect=RuntimeError("炸了")):
             p._safe_fetch_once()
         self.assertIsNotNone(p.state.poll_error)
         results = [{"name": "A", "level": "ok"}]
-        with mock.patch.object(main_mod, "fetch_all", return_value=results):
+        with mock.patch.object(providers_mod, "fetch_all", return_value=results):
             p._safe_fetch_once()
         self.assertIsNone(p.state.poll_error)
         self.assertEqual(p.state.results, results)
@@ -60,9 +61,9 @@ class TestSafeFetchOnce(unittest.TestCase):
         """失败一轮不应把上一轮的结果清空,否则界面直接空掉。"""
         p = _poller()
         results = [{"name": "A", "level": "ok"}]
-        with mock.patch.object(main_mod, "fetch_all", return_value=results):
+        with mock.patch.object(providers_mod, "fetch_all", return_value=results):
             p._safe_fetch_once()
-        with mock.patch.object(main_mod, "fetch_all",
+        with mock.patch.object(providers_mod, "fetch_all",
                                side_effect=RuntimeError("炸了")):
             p._safe_fetch_once()
         self.assertEqual(p.state.results, results)
@@ -70,14 +71,14 @@ class TestSafeFetchOnce(unittest.TestCase):
     def test_last_fetch_advances_on_failure(self):
         p = _poller()
         p.state.last_fetch = 0.0
-        with mock.patch.object(main_mod, "fetch_all",
+        with mock.patch.object(providers_mod, "fetch_all",
                                side_effect=RuntimeError("炸了")):
             p._safe_fetch_once()
         self.assertGreater(p.state.last_fetch, 0.0)
 
     def test_fetching_flag_always_cleared(self):
         p = _poller()
-        with mock.patch.object(main_mod, "fetch_all",
+        with mock.patch.object(providers_mod, "fetch_all",
                                side_effect=RuntimeError("炸了")):
             p._safe_fetch_once()
         self.assertFalse(p.state.fetching)

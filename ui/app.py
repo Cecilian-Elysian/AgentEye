@@ -16,17 +16,23 @@
 
 import tkinter as tk
 
-from ui.theme import PALETTE, Layout, set_theme, current_choice, bind_theme_listener, to_tk_color
+from ui.theme import (PALETTE, Layout, set_theme, current_choice,
+                      bind_theme_listener, to_tk_color, to_tk_color_blended,
+                      blend)
 from ui.fonts import fonts
 from ui.vibrancy import apply_window_chrome
+from ui.screen import work_area, snap_clamp, restore_position
 
 
 MODE_STANDARD = "standard"
 MODE_ESSENTIAL = "essential"
 
+# 右下角缩放热区边长(与 ui.panel 的 grip 视觉一致)
+RESIZE_GRIP = 16
+
 
 class TrafficLight(tk.Canvas):
-    """macOS 风格的圆点按钮。无 hover 效果,鼠标变手型表示可点击。"""
+    """macOS 风格的圆点按钮。hover 提亮 30%,鼠标变手型表示可点击。"""
 
     def __init__(self, parent, kind, color, command, size=None):
         size = size or Layout.TRAFFIC_DOT
@@ -45,6 +51,26 @@ class TrafficLight(tk.Canvas):
         self._dot = self.create_oval(1, 1, size - 1, size - 1,
                                      fill=color, outline="")
         self.bind("<Button-1>", self._on_click)
+        self.bind("<Enter>", self._on_enter, add="+")
+        self.bind("<Leave>", self._on_leave, add="+")
+
+    def _hover_fill(self):
+        try:
+            return blend(self._color, "#FFFFFF", 0.3)
+        except Exception:
+            return self._color
+
+    def _on_enter(self, _e=None):
+        try:
+            self.itemconfig(self._dot, fill=self._hover_fill())
+        except tk.TclError:
+            pass
+
+    def _on_leave(self, _e=None):
+        try:
+            self.itemconfig(self._dot, fill=self._color)
+        except tk.TclError:
+            pass
 
     def _on_click(self, _e=None):
         if self._command:
@@ -56,17 +82,17 @@ class TrafficLight(tk.Canvas):
     def refresh_palette(self, palette=None):
         """主题切换时由父组件调用,刷新画布 bg + 圆点 fill。"""
         palette = palette or PALETTE
+        self._color = {
+            "close": palette.TRAFFIC_RED,
+            "minimize": palette.TRAFFIC_YELLOW,
+            "settings": palette.TRAFFIC_GREEN,
+        }.get(self._kind, self._color)
         try:
             self.configure(bg=to_tk_color(palette.BG))
         except tk.TclError:
             pass
-        fill_map = {
-            "close": palette.TRAFFIC_RED,
-            "minimize": palette.TRAFFIC_YELLOW,
-            "settings": palette.TRAFFIC_GREEN,
-        }
         try:
-            self.itemconfig(self._dot, fill=fill_map.get(self._kind, self._color))
+            self.itemconfig(self._dot, fill=self._color)
         except tk.TclError:
             pass
 
@@ -185,7 +211,12 @@ class MacWindow:
         self.essential_attached = None
 
         self._drag_active = False
+        self._minimized = False
         self._bind_global_drag()
+        self._build_resize_grip()
+        # 黄点最小化走 overrideredirect(False)+iconify;窗口还原(Map)时
+        # 必须把无边框样式装回去,否则永久退化成带原生标题栏的普通窗口
+        root.bind("<Map>", self._on_map_restore, add="+")
 
         bind_theme_listener(self.root, self._on_theme_change)
 
@@ -256,6 +287,11 @@ class MacWindow:
             self.essential_slot.pack_forget()
         except tk.TclError:
             pass
+        # essential 模式下隐藏的缩放热区在 standard 下摆回来
+        try:
+            self._grip.place(relx=1.0, rely=1.0, anchor="se", x=-1, y=-1)
+        except (tk.TclError, AttributeError):
+            pass
         if self.standard_attached is not None:
             inner = self._view_root(self.standard_attached)
             try:
@@ -264,6 +300,11 @@ class MacWindow:
                 pass
 
     def _show_essential(self):
+        # essential 尺寸固定(minsize==maxsize),缩放热区没有意义,隐藏
+        try:
+            self._grip.place_forget()
+        except (tk.TclError, AttributeError):
+            pass
         try:
             if self.standard_attached is not None:
                 inner = self._view_root(self.standard_attached)
@@ -300,12 +341,19 @@ class MacWindow:
             x = self.root.winfo_x()
             y = self.root.winfo_y()
         except tk.TclError:
-            x = ui.get("x") or 100
-            y = ui.get("y") or 100
+            # 用 .get(key, default) 而不是 `or 100`:磁吸存的合法坐标
+            # x=0/y=0 会被 `or` 当成缺失改写
+            x = ui.get("x", 100)
+            y = ui.get("y", 100)
+        fallback = (self.root.winfo_screenwidth(),
+                    self.root.winfo_screenheight())
 
         if mode == MODE_ESSENTIAL:
             w = Layout.ESSENTIAL_W
             h = Layout.HEADER_HEIGHT + Layout.ESSENTIAL_H
+            # 显示器拔掉后按旧坐标恢复 = 窗口彻底失联(overrideredirect
+            # 窗口没有任务栏按钮),钳回最近显示器的工作区
+            x, y = restore_position(x, y, w, h, fallback)
             try:
                 self.root.minsize(w, h)
                 self.root.maxsize(w, h)
@@ -318,6 +366,7 @@ class MacWindow:
         else:
             w = ui.get("width") or 360
             h = ui.get("height") or 360
+            x, y = restore_position(x, y, int(w), int(h), fallback)
             try:
                 self.root.minsize(Layout.MIN_W, Layout.MIN_H)
                 self.root.maxsize(Layout.MAX_W, Layout.MAX_H)
@@ -357,9 +406,26 @@ class MacWindow:
         return a
 
     def _stub_minimize(self):
+        """黄点最小化:临时恢复原生装饰以便 iconify,还原时由 _on_map_restore 装回。"""
+        self._minimized = True
         try:
             self.root.overrideredirect(False)
             self.root.iconify()
+        except tk.TclError:
+            self._minimized = False
+
+    def _on_map_restore(self, event):
+        """窗口从任务栏还原(Map)时重新隐藏边框、恢复置顶。
+
+        漏了这步,overrideredirect 窗口最小化一次就永久变成带原生
+        标题栏的普通窗口,红黄绿点与原生按钮并存。
+        """
+        if event.widget is not self.root or not self._minimized:
+            return
+        self._minimized = False
+        try:
+            self.root.overrideredirect(True)
+            self.root.attributes("-topmost", self._pinned)
         except tk.TclError:
             pass
 
@@ -376,11 +442,77 @@ class MacWindow:
         except tk.TclError:
             pass
 
+    def _build_resize_grip(self):
+        """右下角缩放热区。
+
+        mac 模式下 Panel 不建自己的 grip(见 panel._skip_build_resize_grip),
+        由窗口壳负责;essential 模式尺寸固定(minsize==maxsize),热区隐藏。
+        """
+        grip = tk.Frame(self.outer, bg=to_tk_color(PALETTE.BG),
+                        cursor="size_nw_se",
+                        width=RESIZE_GRIP, height=RESIZE_GRIP,
+                        bd=0, highlightthickness=0)
+        grip.place(relx=1.0, rely=1.0, anchor="se", x=-1, y=-1)
+        dim = to_tk_color_blended(PALETTE.TEXT_DIM)
+        dots = []
+        for i in range(3):
+            r = tk.Frame(grip, bg=dim, width=2, height=2,
+                         bd=0, highlightthickness=0)
+            r.place(x=RESIZE_GRIP - 2 - i * 4, y=RESIZE_GRIP - 2 - i * 4)
+            dots.append(r)
+        grip.bind("<Button-1>", self._grip_start)
+        grip.bind("<B1-Motion>", self._grip_move)
+        grip.bind("<ButtonRelease-1>", self._grip_end)
+        self._grip = grip
+        self._grip_dots = dots
+
+    def _grip_start(self, event):
+        if self._mode == MODE_ESSENTIAL:
+            return
+        self._grip_active = True
+        self._gx = event.x_root
+        self._gy = event.y_root
+        self._gw = self.root.winfo_width()
+        self._gh = self.root.winfo_height()
+
+    def _grip_move(self, event):
+        if not getattr(self, "_grip_active", False):
+            return
+        dx = event.x_root - self._gx
+        dy = event.y_root - self._gy
+        new_w = max(Layout.MIN_W, min(Layout.MAX_W, self._gw + dx))
+        new_h = max(Layout.MIN_H, min(Layout.MAX_H, self._gh + dy))
+        try:
+            self.root.geometry(f"{int(new_w)}x{int(new_h)}")
+        except tk.TclError:
+            pass
+
+    def _grip_end(self, _event=None):
+        if not getattr(self, "_grip_active", False):
+            return
+        self._grip_active = False
+        save_size = (self.actions or {}).get("save_size")
+        if save_size:
+            try:
+                save_size(self.root.winfo_width(), self.root.winfo_height())
+            except Exception:
+                pass
+
     def _apply_chrome(self):
         try:
             self.root.update_idletasks()
             apply_window_chrome(self.root, dark=PALETTE.IS_DARK)
         except Exception:
+            pass
+        # grip 底色/圆点色随主题走;__init__ 里 _apply_chrome 先于 grip
+        # 构建,用 AttributeError 兜底跳过
+        try:
+            if self._mode == MODE_STANDARD:
+                self._grip.configure(bg=to_tk_color(PALETTE.BG))
+                dim = to_tk_color_blended(PALETTE.TEXT_DIM)
+                for d in self._grip_dots:
+                    d.configure(bg=dim)
+        except (tk.TclError, AttributeError):
             pass
 
     def _drag_start(self, event):
@@ -396,17 +528,15 @@ class MacWindow:
             return
         x = event.x_root - self._drag_ox
         y = event.y_root - self._drag_oy
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
-        if x < Layout.EDGE_SNAP:
-            x = 0
-        elif sw - x < Layout.EDGE_SNAP:
-            x = sw - self.root.winfo_width()
-        if y < Layout.EDGE_SNAP:
-            y = 0
-        elif sh - y < Layout.EDGE_SNAP:
-            y = sh - self.root.winfo_height()
-        self.root.geometry(f"+{x}+{y}")
+        # 按窗口当前坐标找最近的显示器,吸附其工作区边缘。
+        # 原先按主屏钳制:左侧/上方副屏拖不进去,右侧/下方副屏
+        # 会被强行拽回主屏边缘,跟用户抢鼠标
+        x, y = snap_clamp(
+            x, y, self.root.winfo_width(), self.root.winfo_height(),
+            work_area(x, y, (self.root.winfo_screenwidth(),
+                             self.root.winfo_screenheight())),
+            Layout.EDGE_SNAP)
+        self.root.geometry(f"+{int(x)}+{int(y)}")
 
     def _drag_end(self, _event=None):
         if self._drag_active:

@@ -73,10 +73,17 @@ def send_toast(title, message):
         """等子进程退出:非 0 说明 WinRT/模板失败,回退 beep。
 
         不在调用线程里等,alert() 保持即时返回。
+        超时的 PowerShell 必须 kill:计数器虽已减,但进程会以隐藏窗口
+        形式挂着(每个几十 MB),常驻数日后耗尽内存。
         """
         try:
             rc = proc.wait(timeout=15)
         except Exception:
+            try:
+                proc.kill()
+                proc.wait(timeout=5)
+            except Exception:
+                pass
             rc = 1
         finally:
             _decrement_proc()

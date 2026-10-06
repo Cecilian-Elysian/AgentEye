@@ -516,6 +516,31 @@ class TestActionWiringCompleteness(unittest.TestCase):
             missing, [],
             f"panel.py 里这些 action 永远拿到兜底 no-op:{missing}")
 
+    # ui/app.py 的 MacWindow 用无兜底的 .get() 读 actions:缺键拿到
+    # None,交通灯点击/保存回调静默无效,连个 lambda 兜底都没有。
+    # minimize 由 MacWindow 自己的窗口逻辑兜底,记录在案。
+    APP_KNOWN_MISSING = {"minimize"}
+
+    def test_app_action_keys_are_wired(self):
+        import threading
+        import tkinter as tk
+        import main as main_mod
+        from ui import app as app_mod
+        src = (Path(app_mod.__file__).read_text(encoding="utf-8"))
+        # 两种读法:actions.get("x") 与 (self.actions or {}).get("x")
+        used = set(re.findall(r'actions(?: or \{\}\))?\.get\("(\w+)"\)', src))
+        self.assertTrue(used, "正则没匹配到任何 app action,测试本身失效")
+
+        root = tk.Tk()
+        self.addCleanup(root.destroy)
+        actions = main_mod.build_actions(root, {}, main_mod.State(),
+                                         threading.Event(),
+                                         threading.Event())
+        missing = sorted(used - set(actions) - self.APP_KNOWN_MISSING)
+        self.assertEqual(
+            missing, [],
+            f"app.py 里这些 action 键在 build_actions 中不存在:{missing}")
+
 
 class TestNoUnresolvedNames(unittest.TestCase):
     """静态检查:函数里读的每个全局名都必须真的存在。
@@ -592,7 +617,7 @@ class TestLevelAlerting(unittest.TestCase):
 
     def test_opencode_go_style_result_warns(self):
         res = {"unit": "$", "pct": 5.0, "remaining": 1.0, "used": None,
-               "total": None, "detail": "5h ≈$0.60/$12"}
+               "total": None, "detail": "5h 剩≈$0.60/$12"}
         self.assertEqual(providers._level(res, {}, self.CFG), "warn")
 
     def test_yuan_uses_absolute_threshold(self):
@@ -662,6 +687,121 @@ class TestOpencodeGoUrlFallback(unittest.TestCase):
             res = oc.fetch({"base_url": "https://opencode.ai", "api_key": "ey-x"})
         self.assertEqual(len(calls), 1, "401 不该去试别的端点")
         self.assertIn("key 无效", res["error"])
+
+    def test_used_monthly_backfilled_for_capsule(self):
+        """胶囊吃 used/total,opencode_go 必须回填 used。
+
+        percent 是剩余语义(与 _level、"只剩 12%" 的约定一致),
+        monthly percent=40 → 月剩余 $24 → used = 60-24 = 36。
+        没有月窗口时 used 保持 None,不能编数。
+        """
+        from providers import opencode_go as oc
+
+        def fake_get(url, headers=None, timeout=None):
+            return self._resp(200, {"usage": {
+                "rolling": {"percent": 50},
+                "monthly": {"percent": 40}}})
+
+        with mock.patch.object(oc.requests, "get", side_effect=fake_get):
+            res = oc.fetch({"base_url": "https://opencode.ai", "api_key": "ey-x"})
+        self.assertAlmostEqual(res["remaining"], 24.0)
+        self.assertAlmostEqual(res["used"], 36.0)
+        self.assertAlmostEqual(res["total"], 60.0)
+
+    def test_used_none_without_monthly_window(self):
+        from providers import opencode_go as oc
+
+        def fake_get(url, headers=None, timeout=None):
+            return self._resp(200, {"usage": {"rolling": {"percent": 50}}})
+
+        with mock.patch.object(oc.requests, "get", side_effect=fake_get):
+            res = oc.fetch({"base_url": "https://opencode.ai", "api_key": "ey-x"})
+        self.assertIsNone(res["used"])
+        self.assertIsNone(res["remaining"])
+
+    def test_403_on_guessed_url_falls_back(self):
+        """WAF 对猜测路径返回 403 很常见,不能提前判死有效 key。"""
+        from providers import opencode_go as oc
+        calls = []
+
+        def fake_get(url, headers=None, timeout=None):
+            calls.append(url)
+            if url == "https://opencode.ai/v1/usage":
+                return self._resp(403)
+            return self._resp(200, {"usage": {"rolling": {"percent": 40}}})
+
+        with mock.patch.object(oc.requests, "get", side_effect=fake_get):
+            res = oc.fetch({"base_url": "https://opencode.ai", "api_key": "ey-x"})
+        self.assertNotIn("error", res)
+        self.assertIn("zen/go", calls[-1])
+
+    def test_403_on_last_url_reports_invalid_key(self):
+        from providers import opencode_go as oc
+
+        def fake_get(url, headers=None, timeout=None):
+            return self._resp(403)
+
+        with mock.patch.object(oc.requests, "get", side_effect=fake_get):
+            res = oc.fetch({"base_url": "", "api_key": "ey-x"})
+        self.assertIn("key 无效", res["error"])
+
+
+class TestGeneric403Fallback(unittest.TestCase):
+    """generic 的候选端点被 WAF 挡成 403 时必须继续回退。
+
+    背景:4 个 probe 是不同路径,nginx 对不存在的管理路径返回 403
+    (而非 404)很常见;旧逻辑在第一个 probe 就报"key 无效",
+    后面本可成功的 new_api_self 不再被尝试。
+    """
+
+    def _resp(self, status, payload=None):
+        m = mock.Mock()
+        m.status_code = status
+        m.json.return_value = payload or {}
+        return m
+
+    def _run(self, statuses_by_path, final_payload):
+        from providers import generic as g
+        probes = tuple(
+            (f"p{p}", p, "_parse_openai_billing") for p in ("/x", "/y"))
+        billing = {"total_granted": 10.0, "total_used": 2.0,
+                   "total_available": 8.0}
+
+        def fake_get(url, headers=None, timeout=None):
+            for path, (status, payload) in statuses_by_path.items():
+                if url.endswith(path):
+                    return self._resp(status, payload)
+            return self._resp(200, final_payload or billing)
+
+        with mock.patch.object(g, "QUOTA_PROBES", probes), \
+                mock.patch.object(g.requests, "get", side_effect=fake_get):
+            return g.fetch({"base_url": "https://relay.example",
+                            "api_key": "sk-test"})
+
+    def test_403_on_first_probe_falls_back(self):
+        billing = {"total_granted": 10.0, "total_used": 2.0,
+                   "total_available": 8.0}
+        res = self._run({"/x": (403, None), "/y": (200, billing)}, None)
+        self.assertNotIn("error", res)
+        self.assertEqual(res["quota_endpoint"], "/y")
+
+    def test_403_on_last_probe_reports_invalid_key(self):
+        res = self._run({"/x": (403, None), "/y": (403, None)}, None)
+        self.assertIn("key 无效", res["error"])
+
+    def test_401_still_fails_fast(self):
+        res = self._run({"/x": (401, None)}, None)
+        self.assertIn("key 无效 (HTTP 401)", res["error"])
+
+
+class TestOpencodeNormPct(unittest.TestCase):
+    def test_no_fraction_guess(self):
+        """0-1 比例的猜测换算必须去掉:0.9(剩 0.9%,最该告警)被 x100
+        放大成 90% 恰好在尾部区间反转方向。"""
+        from providers import opencode_go as oc
+        self.assertAlmostEqual(oc._norm_pct(0.9), 0.9)
+        self.assertAlmostEqual(oc._norm_pct(120), 100.0)
+        self.assertIsNone(oc._norm_pct("x"))
 
 
 class TestAlertCooldownNotInherited(unittest.TestCase):
@@ -1212,16 +1352,19 @@ class TestGenericQuotaPerUsdOverride(unittest.TestCase):
 
 
 class TestOpencodeNormPctBoundary(unittest.TestCase):
-    """v==1 在旧启发式下会被 ×100 变成 100%,实际 API 的 0-100 语义里
-    它就是 1%。只有严格介于 0 和 1 之间的值才当比例放大。"""
+    """percent 按 0-100 的剩余百分比解读,不做 0-1 比例的猜测换算。
+
+    旧启发式把 0<v<1 一律 x100:真实分数百分比如 0.9(剩 0.9%,最该
+    告警的时刻)会被放大成 90%,恰好在最关键的尾部区间反转方向。
+    """
 
     def test_one_stays_one(self):
         from providers import opencode_go
         self.assertEqual(opencode_go._norm_pct(1.0), 1.0)
 
-    def test_fraction_scales(self):
+    def test_fraction_stays_fraction(self):
         from providers import opencode_go
-        self.assertEqual(opencode_go._norm_pct(0.35), 35.0)
+        self.assertEqual(opencode_go._norm_pct(0.35), 0.35)
 
     def test_over_one_untouched(self):
         from providers import opencode_go

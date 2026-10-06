@@ -44,6 +44,14 @@ class MacToplevel(tk.Toplevel):
         except tk.TclError:
             pass
 
+        # 标题栏红点走 _on_close,但 Windows 原生 Alt+F4 / 任务栏关闭
+        # 走 WM_DELETE_WINDOW,不注册就会直接 destroy,跳过 on_close
+        # 里的保存/清理逻辑
+        try:
+            self.protocol("WM_DELETE_WINDOW", self._on_close)
+        except tk.TclError:
+            pass
+
         try:
             self.configure(bg=PALETTE.CARD)
         except tk.TclError:

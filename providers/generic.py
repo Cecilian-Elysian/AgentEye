@@ -84,14 +84,24 @@ def fetch(entry):
     errors = []
     parsed = None
 
-    for label, path, parser_name in QUOTA_PROBES:
+    for pi, (label, path, parser_name) in enumerate(QUOTA_PROBES):
+        is_last = pi + 1 >= len(QUOTA_PROBES)
         try:
             r = requests.get(base + path, headers=headers, timeout=TIMEOUT)
         except requests.RequestException as e:
             errors.append(f"{label}: {e.__class__.__name__}")
             continue
-        if r.status_code in (401, 403):
-            return {"error": f"key 无效 (HTTP {r.status_code})"}
+        if r.status_code == 401:
+            # 鉴权层拒绝与路径无关,直接判 key 无效,不重试其它端点
+            return {"error": "key 无效 (HTTP 401)"}
+        if r.status_code == 403:
+            # 403 只在末位(已知正确的)端点上判 key 无效:nginx/WAF
+            # 对猜测性的管理路径返回 403 很常见,提前判死会把有效 key
+            # 误报成无效,而后面本可成功的端点不再被尝试
+            if is_last:
+                return {"error": "key 无效 (HTTP 403)"}
+            errors.append(f"{label}: HTTP 403")
+            continue
         if r.status_code != 200:
             errors.append(f"{label}: HTTP {r.status_code}")
             continue
@@ -120,8 +130,15 @@ def fetch(entry):
         try:
             import cache
             cache.set_models(base, key, parsed["models"])
-        except Exception as e:      # 缓存写失败不该拖垮额度展示
-            sys.stderr.write(f"模型缓存写入失败:{e.__class__.__name__}: {e}\n")
+        except OSError as e:
+            # 只捕写盘的预期失败(磁盘满/目录只读)。以前的 except
+            # Exception 会把 NameError 这类真 bug 静默吞掉,模型缓存
+            # 永远写不进去还没任何迹象;让编程错误炸到 _failed 暴露。
+            # stderr 判空:pythonw 下 sys.stderr 是 None,裸 write 会
+            # AttributeError 把已经拿到的额度数据整个丢掉。
+            if sys.stderr:
+                sys.stderr.write(
+                    f"模型缓存写入失败:{e.__class__.__name__}: {e}\n")
 
     parsed.setdefault("detail", "")
     parsed["detail"] = f"[{parsed['quota_endpoint']}] {parsed['detail']}".strip()
@@ -155,10 +172,12 @@ def _parse_openai_billing(body, entry):
 
 @_parser("_parse_openai_subscription")
 def _parse_openai_subscription(body, entry):
-    if not isinstance(body, dict) or "data" not in body:
+    if not isinstance(body, dict):
         return None
-    data = body["data"]
-    if not isinstance(data, dict):
+    # 标准响应把字段包在 data 里;个别站点直接平铺在顶层,两种都接受
+    data = body.get("data")
+    data = data if isinstance(data, dict) else body
+    if "hard_limit_usd" not in data:
         return None
     try:
         limit = float(data.get("hard_limit_usd") or 0)

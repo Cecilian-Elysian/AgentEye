@@ -1,3 +1,12 @@
+"""OpenCode Go(zen/go)订阅额度。
+
+percent 字段的语义决定:按"剩余"解读——与 remaining 字段名、
+providers._level 的 pct<=warn 告警方向、面板主值"已用 100-pct"
+保持一致。detail 文案与主值/胶囊必须同向,统一写"剩≈$X/$Y"。
+
+WINDOWS 里的 $12/$30/$60 是硬编码的订阅档位额度:换档后金额会不准,
+is_estimate=True(以及 detail 的"≈")就是为此留下的免责标记。
+"""
 import requests
 
 TIMEOUT = 12
@@ -18,15 +27,16 @@ WINDOWS = (
 
 
 def _norm_pct(v):
+    """percent 视为 0-100 的剩余百分比,钳到 [0, 100]。
+
+    不做 0-1 比例的猜测换算:真实分数百分比如 0.9(剩 0.9%,最该
+    告警的时刻)会被 x100 放大成 90,恰好在最关键的尾部区间把方向
+    反转掉。zhipu 的 percentage 与 relay 的比值口径也都是 0-100。
+    """
     try:
         v = float(v)
     except (TypeError, ValueError):
         return None
-    # 兼容 0-1 比例语义(0.35 → 35%)。严格小于 1 才翻倍:
-    # 恰好 1.0 有歧义(1% 还是 100%),按 1% 处理,和 v<=1 旧写法的
-    # 差别是 v==1 不再被误放大 100 倍。
-    if 0 < v < 1:
-        v *= 100
     return max(0.0, min(100.0, v))
 
 
@@ -54,7 +64,8 @@ def fetch(entry):
 
     r = None
     last_status = None
-    for url in _usage_urls(entry.get("base_url")):
+    urls = _usage_urls(entry.get("base_url"))
+    for i, url in enumerate(urls):
         try:
             r = requests.get(
                 url,
@@ -64,16 +75,23 @@ def fetch(entry):
             )
         except requests.RequestException as e:
             return {"error": f"网络错误: {e.__class__.__name__}"}
-        if r.status_code in (401, 403):
-            return {"error": f"key 无效 (HTTP {r.status_code})"}
+        if r.status_code == 401:
+            # 鉴权层拒绝与路径无关,不需要回退
+            return {"error": "key 无效 (HTTP 401)"}
         if r.status_code == 200:
             break
         last_status = r.status_code
         r = None
-        if r is None and last_status not in (404, 405, 501):
-            # 只在"端点不存在"时才换下一个候选,其它状态码重试无意义
+        is_last = i + 1 >= len(urls)
+        # 404/405/501 = 端点不存在,换下一个候选。403 只在末位(已知
+        # 正确的)端点上判 key 无效:WAF 对猜测路径返回 403 很常见,
+        # 提前判死会把有效 key 误报成无效
+        retryable = last_status in (404, 405, 501, 403) and not is_last
+        if is_last or not retryable:
             break
     if r is None:
+        if last_status == 403:
+            return {"error": "key 无效 (HTTP 403)"}
         return {"error": f"HTTP {last_status}"}
 
     try:
@@ -93,7 +111,7 @@ def fetch(entry):
         if p is None:
             continue
         amt = p / 100.0 * limit
-        parts.append(f"{label} ≈${amt:.2f}/${limit:.0f}")
+        parts.append(f"{label} 剩≈${amt:.2f}/${limit:.0f}")
         pcts.append(p)
         if w.get("resetsAt"):
             resets.append(w["resetsAt"])
@@ -110,9 +128,16 @@ def fetch(entry):
     if resets:
         reset_note = f" · 重置 {_iso_in(resets[0])}"
 
+    # used 必须回填:面板胶囊的长度/颜色吃 used/total。percent 按
+    # "剩余"解读(见模块头),monthly_amt 是"月窗口剩余换算",胶囊
+    # 要的已用就是 60 - monthly_amt,与 detail 的"剩≈$X/$60"同源。
+    used_monthly = None
+    if monthly_amt is not None:
+        used_monthly = max(0.0, 60.0 - monthly_amt)
+
     return {
         "remaining": monthly_amt,
-        "used": None,
+        "used": used_monthly,
         "total": 60.0,
         "unit": "$",
         "pct": min(pcts),

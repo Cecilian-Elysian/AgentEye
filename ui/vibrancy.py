@@ -179,14 +179,6 @@ def apply_window_chrome(root, dark=True):
     return applied
 
 
-def get_hwnd(root):
-    """获取 Tk 窗口的原生 HWND (Win32)。"""
-    try:
-        return int(root.frame(), 16)
-    except Exception:
-        return root.winfo_id()
-
-
 __all__ = [
     "is_windows_11_or_later",
     "apply_windows_rounded_corners",
@@ -194,5 +186,4 @@ __all__ = [
     "apply_windows_dark_titlebar",
     "apply_windows_layered_alpha",
     "apply_window_chrome",
-    "get_hwnd",
 ]

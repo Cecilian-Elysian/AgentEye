@@ -148,5 +148,60 @@ class TestClampIntervalV2(unittest.TestCase):
         self.assertEqual(clamp_interval_v2({"refresh_interval_sec": 120}), 120)
 
 
+class TestSchemaVersionDispatch(unittest.TestCase):
+    """schema_version 类型不对必须按损坏隔离,绝不能落进 v1 迁移。
+
+    背景:手改配置把 2 写成 "2" 字符串时,旧分派会走 v1 迁移——迁移
+    找不到 v1 分立数组,拿空 providers 模板 save_v2 覆盖原文件,
+    且 .v1.bak 已存在时连备份都不做,全部 key 无提示丢失。
+    """
+
+    def _write(self, payload):
+        config_mod.CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        config_mod.CONFIG_PATH.write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    def test_string_version_2_is_quarantined(self):
+        self._write({"schema_version": "2", "providers": [
+            {"id": "a1234567890a", "kind": "deepseek", "name": "DS",
+             "base_url": "https://api.deepseek.com", "key_enc": "AAA="}]})
+        v2 = config_mod.load_v2()
+        self.assertEqual(v2["providers"], [])
+        leftovers = list(config_mod.CONFIG_PATH.parent.glob(
+            "config.json.corrupt-*"))
+        self.assertTrue(leftovers, "原文件必须被隔离留证")
+        self.assertFalse(config_mod.CONFIG_PATH.exists(),
+                         "隔离后原位不应再有 config.json")
+
+    def test_float_version_is_quarantined(self):
+        self._write({"schema_version": 2.0, "providers": []})
+        v2 = config_mod.load_v2()
+        self.assertEqual(v2["schema_version"], 2)
+        self.assertTrue(list(config_mod.CONFIG_PATH.parent.glob(
+            "config.json.corrupt-*")))
+
+    def test_bool_version_is_quarantined(self):
+        # True 在 Python 里是 int 子类,必须显式排除,否则 true==1 落迁移
+        self._write({"schema_version": True, "providers": []})
+        config_mod.load_v2()
+        self.assertTrue(list(config_mod.CONFIG_PATH.parent.glob(
+            "config.json.corrupt-*")))
+
+    def test_int_2_still_loads_as_v2(self):
+        self._write({"schema_version": 2, "providers": []})
+        v2 = config_mod.load_v2()
+        self.assertEqual(v2["schema_version"], 2)
+        self.assertFalse(config_mod.CONFIG_PATH.with_name(
+            "config.json.corrupt-x").exists() and True or False)
+
+    def test_int_1_still_migrates(self):
+        v1 = {"minimax": [{"name": "M", "api_key": "sk-cp-real-key"}]}
+        self._write(v1)
+        v2 = config_mod.load_v2()
+        self.assertEqual(v2["schema_version"], 2)
+        kinds = [p["kind"] for p in v2["providers"]]
+        self.assertEqual(kinds, ["minimax"])
+
+
 if __name__ == "__main__":
     unittest.main()

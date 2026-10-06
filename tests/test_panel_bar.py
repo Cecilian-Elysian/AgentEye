@@ -64,6 +64,12 @@ _PCT_RESULT = {"name": "Z", "type": "zhipu", "unit": "%", "level": "ok",
 _PCT_CONSUMED = 0.2
 
 
+def _fill_x2(bar, rect):
+    """胶囊填充图元的右边界。12 点圆角点集里 coords[2] 是 x2-r,
+    偶数下标里的最大值才是真正的 x2。"""
+    return max(bar.coords(rect)[0::2])
+
+
 class BarFirstFrame(unittest.TestCase):
     """首帧进度条:rebuild 后立即 _update,bar 应正确渲染。"""
 
@@ -93,7 +99,7 @@ class BarFirstFrame(unittest.TestCase):
             real_w = bar.winfo_width()
             self.assertGreaterEqual(real_w, 10)
             coords = bar.coords(w["rect"])
-            x2 = coords[2]
+            x2 = _fill_x2(bar, w["rect"])
             expected = int(real_w * _PCT_CONSUMED)
             self.assertEqual(x2, expected,
                              f"bar x2={x2}, expected {expected} (real_w={real_w})")
@@ -121,18 +127,15 @@ class BarFirstFrame(unittest.TestCase):
 
             ev = type("E", (), {"width": 600})()
             panel_mod._on_bar_configure(ev, bar, rect, w)
-            self.assertEqual(bar.coords(rect)[2],
-                             int(600 * _PCT_CONSUMED))
+            self.assertEqual(_fill_x2(bar, rect), int(600 * _PCT_CONSUMED))
 
             ev.width = 300
             panel_mod._on_bar_configure(ev, bar, rect, w)
-            self.assertEqual(bar.coords(rect)[2],
-                             int(300 * _PCT_CONSUMED))
+            self.assertEqual(_fill_x2(bar, rect), int(300 * _PCT_CONSUMED))
 
             ev.width = 0
             panel_mod._on_bar_configure(ev, bar, rect, w)
-            self.assertEqual(bar.coords(rect)[2],
-                             int(300 * _PCT_CONSUMED))
+            self.assertEqual(_fill_x2(bar, rect), int(300 * _PCT_CONSUMED))
         finally:
             try:
                 toplevel.destroy()
@@ -154,18 +157,17 @@ class BarFirstFrame(unittest.TestCase):
             bar = w["bar"]
             rect = w["rect"]
             pre = bar.coords(rect)
-            self.assertEqual(pre[2], 0,
+            self.assertEqual(max(pre[0::2]), 0,
                              "首帧后 rect 应是 0 宽(未布局时,paint_row 的 winfo_width=1 "
                              "被 width>=2 守卫拦截)")
 
             bar.update_idletasks()
-            post = bar.coords(rect)
             real_w = bar.winfo_width()
             self.assertGreaterEqual(real_w, 10)
-            self.assertEqual(post[2], int(real_w * _PCT_CONSUMED),
+            self.assertEqual(_fill_x2(bar, rect), int(real_w * _PCT_CONSUMED),
                              f"布局完成后 Configure handler 应把 rect 画到 "
                              f"int({real_w} * {_PCT_CONSUMED}) = "
-                             f"{int(real_w * _PCT_CONSUMED)},实际 {post[2]}")
+                             f"{int(real_w * _PCT_CONSUMED)},实际 {_fill_x2(bar, rect)}")
         finally:
             try:
                 toplevel.destroy()

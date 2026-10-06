@@ -11,9 +11,17 @@ class TestKeyPrefix(unittest.TestCase):
         self.assertEqual(r["confidence"], "high")
 
     def test_opencode_jwt(self):
+        # "ey" 开头的三段式 JWT 与 MiniMax token_plan 的 key 分不出来,
+        # 置信度必须是 low 并提示核对,不能 medium 装作很确定
         r = detect("eyJhbGciOiJIUzI1NiJ9.payload.signature")
         self.assertEqual(r["kind"], "opencode_go")
-        self.assertEqual(r["confidence"], "medium")
+        self.assertEqual(r["confidence"], "low")
+        self.assertIn("MiniMax", r["notes"])
+
+    def test_ey_without_jwt_shape_is_not_opencode(self):
+        # 旧逻辑裸前缀 "ey" 就命中 opencode_go,把其它形态误判进去
+        r = detect("ey-plain-token-no-dots")
+        self.assertNotEqual(r["kind"], "opencode_go")
 
     def test_generic_sk_no_url(self):
         r = detect("sk-abcdefghij1234567890")

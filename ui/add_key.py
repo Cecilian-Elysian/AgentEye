@@ -19,6 +19,7 @@
   5. 回调 on_save(entry),随后 on_done()(宿主决定去向)
 """
 
+import queue
 import threading
 import time
 import tkinter as tk
@@ -54,6 +55,8 @@ class AddKeyForm(tk.Frame):
         self.on_done = on_done
         self.generic_probe = generic_probe or _generic_probe_default
         self._probe_thread = None
+        self._probe_queue = queue.Queue()
+        self._probe_pump_on = False
         self._probe_after_id = None
         self._probe_result = None
         self._probe_started_at = 0.0
@@ -293,7 +296,11 @@ class AddKeyForm(tk.Frame):
         self.preview.config(state="disabled")
 
     def _schedule_probe(self, delay=0.3):
+        # 探测线程在跑时不能直接 return:用户改了 key/url 之后,在途
+        # 探测的旧结果会按旧输入放行保存(探测竞态)。记下挂起标志,
+        # 探测完成后由 _probe_done 自动重排。
         if self._probe_thread and self._probe_thread.is_alive():
+            self._probe_pending = True
             return
         # 连续击键会排出一串 0.6s 定时器(无上限),表单销毁后它们照样触发,
         # 在已销毁控件上 config(...) 抛 TclError。只保留最后一个。
@@ -327,9 +334,36 @@ class AddKeyForm(tk.Frame):
         self.detect_btn.config(state="disabled")
         self.save_btn.config(state="disabled")
         self._probe_started_at = time.time()
+        # 输入快照:_probe_done 用它判断结果是否还对应表单里的内容
+        self._probe_input = (key, url)
         self._probe_thread = threading.Thread(
             target=self._probe_worker, args=(key, url), daemon=True)
         self._probe_thread.start()
+        self._schedule_pump()
+
+    def _schedule_pump(self):
+        """在主线程排一个队列清理回调。窗口已销毁时静默放弃。"""
+        if self._probe_pump_on:
+            return
+        self._probe_pump_on = True
+        try:
+            self.after(80, self._drain_probe_results)
+        except tk.TclError:
+            self._probe_pump_on = False
+
+    def _drain_probe_results(self):
+        self._probe_pump_on = False
+        try:
+            while True:
+                detected, probe_result, elapsed = \
+                    self._probe_queue.get_nowait()
+                self._probe_done(detected, probe_result, elapsed)
+        except queue.Empty:
+            pass
+        busy = not self._probe_queue.empty() or (
+            self._probe_thread and self._probe_thread.is_alive())
+        if busy:
+            self._schedule_pump()
 
     def _probe_worker(self, key, url):
         detected = detect_mod.detect(key, url)
@@ -342,15 +376,27 @@ class AddKeyForm(tk.Frame):
             except Exception as e:
                 probe_result = {"error": str(e)}
         elapsed = time.time() - self._probe_started_at
-        # 后台线程里调 Tk:窗口在这 8 秒内被关掉时 after 会抛,
-        # 裸抛会在线程里打一条用户看不到的 traceback(而且 save_btn
-        # 永远停在 disabled)。同款代码在 model_panel 里已有 TclError 兜底。
-        try:
-            self.after(0, self._probe_done, detected, probe_result, elapsed)
-        except (tk.TclError, RuntimeError):
-            pass
+        # tkinter 的 after/createcommand 不允许在工作线程调用
+        # (RuntimeError: main thread is not in main loop),原实现把
+        # 异常整个吞掉:探测结果静默丢失,save_btn 永久 disabled。
+        # 结果进队列,主线程经 _drain_probe_results 取走。
+        self._probe_queue.put((detected, probe_result, elapsed))
 
     def _probe_done(self, detected, probe_result, elapsed):
+        # 输入在探测期间被改过 / 有挂起的重排 → 这份结果对应旧输入,
+        # 不能用它放行保存或展示,自动重排一次探测
+        current = (self.key_var.get().strip(),
+                   "" if self._url_placeholder else self.url_var.get().strip())
+        pending = getattr(self, "_probe_pending", False)
+        self._probe_pending = False
+        if current != getattr(self, "_probe_input", current):
+            self._set_preview("输入已变化,重新探测 …")
+            self.save_btn.config(state="disabled")
+            self._schedule_probe(0.3)
+            return
+        if pending:
+            self._schedule_probe(0.0)
+            return
         self.detect_btn.config(state="normal")
         lines = [
             f"类型:     {detected['kind']}",

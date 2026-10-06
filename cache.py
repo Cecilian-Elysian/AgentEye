@@ -92,6 +92,8 @@ def get_models(base_url, api_key, ttl=None):
     models = entry.get("models")
     if not isinstance(models, list):
         return None
+    # 历史版本写过非字符串元素(数字 id),调用方按 str 拼 menu/请求
+    models = [m for m in models if isinstance(m, str)]
     order = entry.get("order")
     if not isinstance(order, list):
         order = []
@@ -137,7 +139,8 @@ def save_model_order(base_url, api_key, order):
             order = [m for m in order if m in models]
         entry["order"] = order
         entry.setdefault("models", models)
-        entry["fetched_at"] = time.time()
+        # 只动排序,不碰 fetched_at:重排不是重新拉取,刷新 TTL 会
+        # 让"模型列表过期"的判断被排序动作无限续命。
         cache[key] = entry
         _save_json(MODELS_CACHE, cache)
 
@@ -205,8 +208,11 @@ def log_probe(provider_name, model_id, success, latency_ms, error=""):
         "latency_ms": float(latency_ms),
         "error": str(error) if error else "",
     }
-    with PROBE_LOG.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    # append 与 _trim_probe_log 的读改写共用一把锁,不然裁剪进行到
+    # 一半时新行插进去,裁掉的是旧行、写回的却少了新行
+    with _lock:
+        with PROBE_LOG.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
     _trim_probe_log()
 
 
@@ -264,15 +270,21 @@ def load_alert_state():
 
 
 def remove_provider_entries(base_url, api_key):
-    """从 models.json 删除该 (base_url, key) 的条目(列表 + 排序)。"""
-    _ensure()
-    cache = _load_json(MODELS_CACHE)
-    key = _hash(base_url or "", api_key or "")
-    if key in cache:
-        cache.pop(key, None)
-        _save_json(MODELS_CACHE, cache)
-        return True
-    return False
+    """从 models.json 删除该 (base_url, key) 的条目(列表 + 排序)。
+
+    与 set_models 一样必须持 _lock:本函数跑在 Tk 主线程(删除 provider
+    时),set_models 跑在轮询线程,读-改-写不加锁会互相截断丢更新,
+    见文件头不变式说明。
+    """
+    with _lock:
+        _ensure()
+        cache = _load_json(MODELS_CACHE)
+        key = _hash(base_url or "", api_key or "")
+        if key in cache:
+            cache.pop(key, None)
+            _save_json(MODELS_CACHE, cache)
+            return True
+        return False
 
 
 def log_provider_deleted(provider_name, base_url=""):
@@ -284,8 +296,9 @@ def log_provider_deleted(provider_name, base_url=""):
         "provider": provider_name,
         "base_url": base_url or "",
     }
-    with PROBE_LOG.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    with _lock:
+        with PROBE_LOG.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
 
 
 def recent_probes(provider_name=None, limit=20):

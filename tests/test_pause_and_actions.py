@@ -125,7 +125,7 @@ class TestFmtPaused(unittest.TestCase):
 
     def test_panel_fmt_main_normal_unaffected(self):
         from ui.panel import _fmt_main
-        self.assertEqual(_fmt_main({"unit": "%", "pct": 42}), "42%")
+        self.assertEqual(_fmt_main({"unit": "%", "pct": 42}), "已用 58%")
         self.assertEqual(_fmt_main({"unconfigured": True}), "未配置")
         self.assertEqual(_fmt_main({"error": "boom"}), "查询失败")
 

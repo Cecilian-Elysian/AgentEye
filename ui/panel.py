@@ -13,8 +13,9 @@ import tkinter as tk
 import weakref
 
 import config as config_mod
-from ui.theme import PALETTE, set_theme, bind_theme_listener, to_tk_color, to_tk_color_blended
+from ui.theme import PALETTE, Layout, set_theme, bind_theme_listener, to_tk_color, to_tk_color_blended
 from ui.scrollbar_style import make_dark_scrollbar
+from ui.screen import work_area, snap_clamp
 
 FONT = "Microsoft YaHei UI"
 
@@ -129,8 +130,13 @@ def _fmt_main(result):
             return f"{prefix}{unit}{rem:,.2f} / {unit}{total:,.2f}"
         return f"{prefix}{unit}{rem:,.2f}"
     if unit == "%":
+        # 主值与胶囊同口径:条长/条色画的是已消耗占比,数字就写"已用",
+        # 不再显示剩余 pct——两者互补,并列展示必然有一边被误读。
         pct = result.get("pct")
-        return f"{pct:.0f}%" if pct is not None else "-"
+        if pct is None:
+            return "-"
+        used = max(0.0, min(100.0, 100.0 - float(pct)))
+        return f"已用 {used:.0f}%"
     rem = result.get("remaining")
     return f"{prefix}{rem:,.2f}{unit}" if rem is not None else "-"
 
@@ -159,7 +165,13 @@ def _usage_ratio(result):
     """返回 0..1 之间的"消耗占比"。0=全新,1=耗尽。
 
     金额行优先用 used_today/total(贴近"今日消耗"语义),
-    否则用 used/total,否则按 level 降级映射。
+    否则用 used/total;百分比行用 (100-pct)/100。
+    拿不到可算的分子分母就返回 None——绝不按 level 编一个假比例:
+    假比例会被画进胶囊长度,deepseek 余额 ¥5000 和 ¥6 会一样长。
+
+    注意:金额行**不**用 pct 兜底。opencode_go 的 percent 字段在
+    providers 里存在"已用/剩余"两种读法(providers/opencode_go.py
+    把它乘 limit 当已用,_level 把它当剩余),方向不明前宁可不算。
     """
     if result.get("unconfigured") or result.get("error"):
         return None
@@ -174,28 +186,47 @@ def _usage_ratio(result):
             return max(0.0, min(1.0, used_today / total))
         if isinstance(used, (int, float)):
             return max(0.0, min(1.0, used / total))
+        return None
     if unit == "%" and isinstance(pct, (int, float)):
         return max(0.0, min(1.0, (100 - pct) / 100))
 
-    level = result.get("level", "ok")
-    return {"ok": 0.15, "warn": 0.55, "critical": 0.85}.get(level, 0.15)
+    return None
+
+
+def _row_color(result):
+    """行内数值与胶囊共用的颜色。
+
+    - 有占比 → 按消耗比绿→黄→红渐变(与胶囊同源)
+    - 无占比:level 是 warn/critical 时沿用等级色——余额类行
+      (deepseek/中转订阅)拿不到占比但 _level 按 ¥5 阈值判级,
+      余额 ¥1 显示灰字而标题点是红色,自相矛盾
+    - 其余(unconfigured/paused/error/unknown/ok)→ 灰
+    """
+    ratio_val = _usage_ratio(result)
+    if ratio_val is not None:
+        return _usage_color(ratio_val), ratio_val
+    level = result.get("level", "unknown")
+    if level in ("warn", "critical"):
+        return C[level], None
+    return C["off"], None
 
 
 def _usage_color(ratio):
-    """绿(0) → 黄(0.5) → 红(1) 三色插值。"""
+    """绿(0) → 黄(0.5) → 红(1) 三色插值,端点实时取 PALETTE。
+
+    原先把 #53d77a/#f0c24b/#ff5d5d 写死在函数体里,浅色主题下这组
+    颜色偏深,且与等级色(LEVEL_COLOR)不来自同一来源。
+    """
     if ratio is None:
         return C["dim"]
+    stops = (to_tk_color(PALETTE.OK), to_tk_color(PALETTE.WARN),
+             to_tk_color(PALETTE.CRITICAL))
+    rgb = [tuple(int(s[i:i + 2], 16) for i in (1, 3, 5)) for s in stops]
     ratio = max(0.0, min(1.0, ratio))
-    if ratio <= 0.5:
-        t = ratio / 0.5
-        r = int(0x53 + (0xf0 - 0x53) * t)
-        g = int(0xd7 + (0xc2 - 0xd7) * t)
-        b = int(0x7a + (0x4b - 0x7a) * t)
-    else:
-        t = (ratio - 0.5) / 0.5
-        r = int(0xf0 + (0xff - 0xf0) * t)
-        g = int(0xc2 + (0x5d - 0xc2) * t)
-        b = int(0x4b + (0x5d - 0x4b) * t)
+    seg = 0 if ratio <= 0.5 else 1
+    t = (ratio - 0.5 * seg) / 0.5
+    c0, c1 = rgb[seg], rgb[seg + 1]
+    r, g, b = (int(c0[i] + (c1[i] - c0[i]) * t) for i in range(3))
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
@@ -221,15 +252,59 @@ def _set_detail_with_tags(text_widget, text, fg):
     text_widget.config(state="disabled")
 
 
+def _rounded_points(x1, y1, x2, y2, r):
+    """12 点圆角矩形点集,配合 create_polygon(smooth=True) 画胶囊。
+
+    每个角给两个相邻边上的点,smooth 样条自动把角部圆化;
+    半径由角点间距决定,r 取条高一半即得全圆角(胶囊)。
+    """
+    return (x1 + r, y1, x2 - r, y1,
+            x2, y1, x2, y1 + r,
+            x2, y2 - r, x2, y2,
+            x2 - r, y2, x1 + r, y2,
+            x1, y2, x1, y2 - r,
+            x1, y1 + r, x1, y1)
+
+
+def _draw_capsule(bar, widgets, width, frac, color):
+    """画胶囊轨道与填充。width 来自 <Configure> 或 winfo_width。
+
+    - 轨道永远画满 0..width,颜色 C["bar_bg"]
+    - 填充 0..int(width*frac);不足一个圆头直径(2r)时不画——
+      12 点点集在 x2 < 2r 时会出现反向坐标,画出来是畸形,
+      与其失真不如隐藏(不足 12px ≈ 用量 4%,肉眼本来不可辨)
+    - frac 为 None(未知占比)等同 0,绝不画满格
+    """
+    h = Layout.ROW_BAR_HEIGHT
+    r = h / 2.0
+    rect = widgets.get("rect")
+    track = widgets.get("track")
+    if bar is None or rect is None:
+        return
+    try:
+        if track is not None:
+            bar.coords(track, *_rounded_points(0, 0, width, h, r))
+            bar.itemconfig(track, fill=C["bar_bg"], state="normal")
+        x2 = int(width * max(0.0, min(1.0, frac or 0.0)))
+        if x2 < 2 * r:
+            bar.itemconfig(rect, state="hidden")
+            return
+        bar.coords(rect, *_rounded_points(0, 0, x2, h, r))
+        bar.itemconfig(rect, fill=color, state="normal")
+    except tk.TclError:
+        pass
+
+
 def _on_bar_configure(event, bar, rect, widgets):
-    """Tk 布局驱动:bar 实际 width 就绪 / 尺寸变化时重画 rect。
+    """Tk 布局驱动:bar 实际 width 就绪 / 尺寸变化时重画胶囊。
 
     替代原 ``bar.winfo_width() or 300`` 兜底:
     - 首帧布局完成 → ``<Configure>`` 触发,``event.width`` 正确 → 修"刚打开进度条看不见"
     - 窗口 resize → bar 跟随 pack(fill="x") 重排 → ``<Configure>`` 触发 → 修"resize 后 bar 不跟随"
 
     颜色/比例由 ``_paint_row`` 写入 ``widgets["_bar_color"]`` / ``widgets["_bar_frac"]``。
-    两个键均未初始化时(placeholder 行)直接跳过,保持空 rect。
+    两个键均未初始化时(placeholder 行)直接跳过;只有其一但 frac 缺失按 0 处理,
+    不画满格——未初始化就显示满格额度是误导。
     """
     color = widgets.get("_bar_color")
     frac = widgets.get("_bar_frac")
@@ -241,12 +316,8 @@ def _on_bar_configure(event, bar, rect, widgets):
     if color is None:
         color = C["dim"]
     if frac is None:
-        frac = 1.0
-    try:
-        bar.coords(rect, 0, 0, int(width * frac), 5)
-        bar.itemconfig(rect, fill=color)
-    except tk.TclError:
-        pass
+        frac = 0.0
+    _draw_capsule(bar, widgets, width, frac, color)
 
 
 def _is_amount_mode(result):
@@ -289,6 +360,7 @@ class Panel:
         self._sig = None
         self._rows = {}
         self._last_paint = {}
+        self._anim_rows = set()
         self._last_focus_refresh = 0.0
         self._tick_after_id = None
         _register_self(self)
@@ -432,8 +504,9 @@ class Panel:
         return None
 
     def _skip_build_resize_grip(self):
-        # mac 模式下 grip 由 MacWindow 接管。必须显式置 None,否则
-        # _is_window_drag_target 读 self._resize_grip 会 AttributeError。
+        # mac 模式下 grip 由 MacWindow 接管(MacWindow._build_resize_grip)。
+        # 必须显式置 None,否则 _is_window_drag_target 读 self._resize_grip
+        # 会 AttributeError。
         self._resize_grip = None
         return None
 
@@ -499,7 +572,14 @@ class Panel:
             save_pin(self._pinned)
 
     def _build_menu(self):
-        m = tk.Menu(self.root, tearoff=0)
+        # 与 ui/row_menu 同一套配色:默认 tk.Menu 是系统灰,
+        # 在深色窗口旁边非常突兀
+        m = tk.Menu(
+            self.root, tearoff=0, bd=0,
+            bg=C["card"], fg=C["text"],
+            activebackground=C["card_hover"],
+            activeforeground=C["text"],
+        )
         m.add_command(label="立即刷新", command=self.actions["refresh_now"])
         m.add_command(label="通知测试", command=self.actions["test_notify"])
         m.add_command(label="添加 Key…",
@@ -570,17 +650,14 @@ class Panel:
             return
         x = event.x_root - self._ox
         y = event.y_root - self._oy
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
-        if x < EDGE_SNAP:
-            x = 0
-        elif sw - x < EDGE_SNAP:
-            x = sw - self.root.winfo_width()
-        if y < EDGE_SNAP:
-            y = 0
-        elif sh - y < EDGE_SNAP:
-            y = sh - self.root.winfo_height()
-        self.root.geometry(f"+{x}+{y}")
+        # 与 MacWindow 同款:按窗口当前坐标找最近的显示器吸附其工作区,
+        # 主屏钳制在多显示器下会把副屏窗口强行拽回去
+        x, y = snap_clamp(
+            x, y, self.root.winfo_width(), self.root.winfo_height(),
+            work_area(x, y, (self.root.winfo_screenwidth(),
+                             self.root.winfo_screenheight())),
+            EDGE_SNAP)
+        self.root.geometry(f"+{int(x)}+{int(y)}")
 
     def _drag_end(self, event):
         if not self._drag_ok:
@@ -660,7 +737,15 @@ class Panel:
                             pass
                 bar = widgets.get("bar")
                 if bar is not None:
-                    bar.configure(bg=C["bar_bg"])
+                    # canvas 底色由上面的 child 循环刷成卡片色;胶囊本体
+                    # (轨道/填充)是 canvas 图元,configure(bg) 够不到,
+                    # 轨道色必须在这里重设,否则浅色主题残留深色轨道。
+                    track = widgets.get("track")
+                    if track is not None:
+                        try:
+                            bar.itemconfig(track, fill=C["bar_bg"])
+                        except tk.TclError:
+                            pass
                 for key in ("name", "value", "detail"):
                     w = widgets.get(key)
                     if w is None:
@@ -680,9 +765,20 @@ class Panel:
         results = list(getattr(self.state, "results", None) or [])
         if results:
             try:
+                yview = self.rows_canvas.yview()
+            except tk.TclError:
+                yview = None
+            try:
                 self._rebuild(results)
             except Exception:
                 pass
+            # _rebuild 销毁重建所有行,scrollregion 塌缩会把 yview 钳回 0;
+            # 不恢复的话每次主题切换列表都跳回顶部
+            if yview:
+                try:
+                    self.rows_canvas.yview_moveto(yview[0])
+                except tk.TclError:
+                    pass
 
     def _on_root_configure(self, event):
         if event.widget is not self.root:
@@ -693,12 +789,17 @@ class Panel:
             return
         if width <= 1:
             return
-        wrap = max(120, width - 36)
+        # detail 是 Text(wrap="word"),按像素自动换行;但 width 以
+        # "平均字符"计且创建后固定,窗口拉宽后长 detail 不会利用新
+        # 空间。按窗口宽估字符数同步放大(9pt 下 ≈7px/字符)。
+        # 原实现 configure(wraplength=...) —— Text 没有该选项,每次
+        # TclError 被吞,整个回调是死代码。
+        chars = max(12, (width - 32) // 7)
         for w in self._rows.values():
             d = w.get("detail")
             if d is not None:
                 try:
-                    d.configure(wraplength=wrap)
+                    d.configure(width=chars)
                 except tk.TclError:
                     pass
 
@@ -879,6 +980,10 @@ class Panel:
         for w in cards:
             w.pack(fill="x", pady=3)
         new_order = [getattr(c, "_provider_name", "") for c in cards]
+        # 占位行("未配置任何 provider")也挂在 rows_frame 下且带
+        # _provider_name,不按真实结果过滤会把占位文本存进 order
+        known = {r.get("name") for r in (self.state.results or [])}
+        new_order = [n for n in new_order if n in known]
         save_order = self.actions.get("save_order")
         if save_order:
             save_order(new_order)
@@ -906,7 +1011,9 @@ class Panel:
             if not self.root.winfo_exists():
                 return
             self._update()
-            self._tick_after_id = self.root.after(1000, self._tick)
+            # 有行在滑条缓动中 → 33ms 快 tick,收敛后回 1Hz
+            delay = 33 if self._anim_rows else 1000
+            self._tick_after_id = self.root.after(delay, self._tick)
         except tk.TclError:
             pass
 
@@ -927,7 +1034,11 @@ class Panel:
 
     def _update(self):
         results = list(self.state.results or [])
-        sig = tuple((r.get("name"), r.get("type")) for r in results)
+        # sig 必须含 unit:行的结构(有没有胶囊、卡片底色)由 is_amount
+        # 在 _row_skeleton 时决定。首次拉取失败时 unit="" 会按"非金额行"
+        # 建出胶囊,之后拿到 "$" 若不重建,那根胶囊就永久空着。
+        sig = tuple((r.get("name"), r.get("type"), r.get("unit"))
+                    for r in results)
         if sig != self._sig:
             self._rebuild(results)
             self._sig = sig
@@ -978,6 +1089,9 @@ class Panel:
             child.destroy()
         self._rows = {}
         self._last_paint = {}
+        # 行重建后旧动画目标全作废;不清理的话集合里留下死名,
+        # _tick 永远跑 33ms 快档
+        self._anim_rows = set()
         if not results:
             box = self._row_skeleton("未配置任何 provider", "右键 + 添加 Key",
                                       {"unit": ""})
@@ -1020,13 +1134,19 @@ class Panel:
         det_lbl.config(state="disabled")
         bar = None
         rect = None
+        track = None
         if not is_amount:
-            bar = tk.Canvas(card, height=5, bg=C["bar_bg"], highlightthickness=0)
+            bar = tk.Canvas(card, height=Layout.ROW_BAR_HEIGHT, bg=bg,
+                            highlightthickness=0, bd=0)
             bar.pack(fill="x", padx=8, pady=(4, 7))
-            rect = bar.create_rectangle(0, 0, 0, 5, outline="")
+            poly_kw = {"outline": "", "width": 0, "smooth": True,
+                       "splinesteps": 12, "state": "hidden"}
+            track = bar.create_polygon(0, 0, 0, 0, **poly_kw)
+            rect = bar.create_polygon(0, 0, 0, 0, **poly_kw)
 
         widgets = {"frame": card, "name": name_lbl, "value": value_lbl,
                    "detail": det_lbl, "bar": bar, "rect": rect,
+                   "track": track,
                    "provider_name": name, "is_amount": is_amount}
 
         if bar is not None:
@@ -1046,10 +1166,36 @@ class Panel:
         value_lbl.bind("<Leave>", lambda e, n=name: self._unflash_value(n))
 
 
-        card.bind("<Button-3>", lambda e, n=name: self._popup_row_menu(e, n))
-        name_lbl.bind("<Button-3>", lambda e, n=name: self._popup_row_menu(e, n))
+        for w in (card, top, name_lbl, det_lbl, bar, value_lbl):
+            if w is None:      # 金额行没有 bar
+                continue
+            w.bind("<Button-3>", lambda e, n=name: self._popup_row_menu(e, n))
+            # 按下态:点击时卡片压暗一档,松开恢复,给"按到了"的反馈
+            w.bind("<ButtonPress-1>",
+                   lambda e, ww=card: self._card_press(ww), add="+")
+            w.bind("<ButtonRelease-1>",
+                   lambda e, ww=card: self._card_release(ww), add="+")
 
-        drag_widgets = [w for w in (card, top, name_lbl, det_lbl, bar) if w is not None]
+        # tooltip:估算值说明 + 完整 detail(detail Text 只有 1 行高,
+        # 长文案平时是被裁掉的,悬浮看全文)
+        from ui.tooltip import attach as _attach_tip
+
+        def _tip_text(n=name):
+            for rr in (self.state.results or []):
+                if rr.get("name") == n:
+                    bits = []
+                    if rr.get("is_estimate"):
+                        bits.append("估算值,非官方精确口径")
+                    d = rr.get("detail") or ""
+                    if d:
+                        bits.append(d)
+                    return "\n".join(bits) or None
+            return None
+
+        _attach_tip(card, _tip_text)
+
+        drag_widgets = [w for w in (card, top, name_lbl, det_lbl, bar,
+                                    value_lbl) if w is not None]
         for w in drag_widgets:
             w.bind("<Button-1>", lambda e, n=name: self._drag_press(e, n), add="+")
             w.bind("<B1-Motion>", lambda e, n=name: self._drag_motion(e, n), add="+")
@@ -1060,11 +1206,51 @@ class Panel:
     def _copy_value(self, name):
         for r in self.state.results or []:
             if r.get("name") == name:
-                rem = r.get("remaining")
-                if rem is not None:
+                # 复制所见即所得的主值:% 行的 remaining 是裸小数甚至 None,
+                # 直接复制会静默无反应或贴出 0.27 这种没人看得懂的数
+                text = _fmt_main(r)
+                if text:
                     self.root.clipboard_clear()
-                    self.root.clipboard_append(str(rem))
+                    self.root.clipboard_append(text)
+                    self._flash_copied(name)
                 return
+
+    def _card_press(self, card):
+        try:
+            card.configure(bg=C["card_pressed"])
+        except tk.TclError:
+            pass
+
+    def _card_release(self, card):
+        try:
+            card.configure(bg=getattr(card, "_bg", C["card"]))
+        except tk.TclError:
+            pass
+
+    def _flash_copied(self, name, which="value"):
+        """复制成功后把该行标签短暂染成 ok 绿,给个可见反馈。
+
+        只改前景色、不动文本,所以和 _paint_row 的签名去重不打架。
+        """
+        w = (self._rows.get(name) or {}).get(which)
+        if w is None:
+            return
+        try:
+            if which == "value":
+                orig = self._value_color(name)
+            else:
+                orig = C["text"]
+            w.config(fg=C["ok"])
+            self.root.after(450, lambda: self._restore_fg(w, orig))
+        except tk.TclError:
+            pass
+
+    @staticmethod
+    def _restore_fg(w, orig):
+        try:
+            w.config(fg=orig)
+        except tk.TclError:
+            pass
 
     def _popup_row_menu(self, event, name):
         self._popup_target_name = name
@@ -1099,6 +1285,7 @@ class Panel:
                 if key:
                     self.root.clipboard_clear()
                     self.root.clipboard_append(key)
+                    self._flash_copied(name, "name")
                 return
 
     def _copy_url(self, name):
@@ -1108,6 +1295,7 @@ class Panel:
                 if url:
                     self.root.clipboard_clear()
                     self.root.clipboard_append(url)
+                    self._flash_copied(name, "name")
                 return
 
     def _show_models(self, name):
@@ -1160,7 +1348,7 @@ class Panel:
         """当前行的数值应该是什么颜色(按等级实算,不缓存)。"""
         for r in (self.state.results or []):
             if r.get("name") == name:
-                return _usage_color(_usage_ratio(r))
+                return _row_color(r)[0]
         return C["dim"]
 
     def _flash_value(self, name):
@@ -1183,24 +1371,21 @@ class Panel:
             pass
 
     def _paint_row(self, widgets, r):
-        ratio_val = _usage_ratio(r)
-        color = _usage_color(ratio_val)
+        color, ratio_val = _row_color(r)
+        level = r.get("level", "unknown")
+        name = r.get("name")
+        # 滑条动画中的行跳过签名去重:否则目标值不变时 key 相同,
+        # 每帧都被 early-return,动画永远收敛不了
+        animating = name in self._anim_rows
         key = (r.get("name"), r.get("level"), r.get("remaining"),
                r.get("total"), r.get("pct"), r.get("detail"), r.get("error"),
-               r.get("updated_at"), ratio_val)
-        if self._last_paint.get(widgets["provider_name"]) == key:
+               r.get("updated_at"), ratio_val, r.get("used_today"),
+               r.get("used"), r.get("paused"), r.get("unconfigured"))
+        if not animating and \
+                self._last_paint.get(widgets["provider_name"]) == key:
             return
         self._last_paint[widgets["provider_name"]] = key
 
-        level = r.get("level", "unknown")
-        if ratio_val is None or r.get("unconfigured"):
-            color = C["off"]
-        elif level == "paused":
-            color = C["off"]
-        elif level in ("error",):
-            color = C["error"]
-        elif level == "unknown":
-            color = C["dim"]
         widgets["value"].config(text=_fmt_main(r), fg=color)
 
         detail = r.get("detail") or ""
@@ -1227,10 +1412,23 @@ class Panel:
         frac = 0.0 if ratio_val is None else max(0.0, min(1.0, ratio_val))
         widgets["_bar_frac"] = frac
         widgets["_bar_color"] = color
+        # 缓动:条从当前显示值滑向目标,而不是瞬移。颜色(渐变插值)
+        # 不跟随缓动、每帧直接用目标色:渐变色差肉眼几乎不可辨,
+        # 而位置跳变很扎眼
+        disp = widgets.get("_anim_frac")
+        if disp is None:
+            disp = frac
+        else:
+            diff = frac - disp
+            disp = frac if abs(diff) <= 0.0025 else disp + diff * 0.35
+        if disp != frac:
+            self._anim_rows.add(name)
+        else:
+            self._anim_rows.discard(name)
+        widgets["_anim_frac"] = disp
         try:
             width = bar.winfo_width()
         except tk.TclError:
             width = 0
         if width >= 2:
-            bar.coords(rect, 0, 0, int(width * widgets["_bar_frac"]), 5)
-            bar.itemconfig(rect, fill=widgets["_bar_color"])
+            _draw_capsule(bar, widgets, width, disp, color)

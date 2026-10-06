@@ -8,6 +8,10 @@ SYMBOLS = {"CNY": "¥", "USD": "$"}
 
 def fetch(entry):
     base = (entry.get("base_url") or "https://api.deepseek.com").rstrip("/")
+    # OpenAI 兼容客户端习惯填 https://api.deepseek.com/v1,而余额端点
+    # 挂在根路径下,带 /v1 会 404 被报成"HTTP 404"
+    if base.endswith("/v1"):
+        base = base[:-3]
     key = entry.get("api_key") or ""
     if not key:
         return {"error": "未配置 api_key", "unconfigured": True}

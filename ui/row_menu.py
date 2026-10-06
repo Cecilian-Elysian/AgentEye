@@ -7,6 +7,8 @@ Actions 通过 callbacks 注入,保持解耦。
 
 import tkinter as tk
 
+from ui.theme import PALETTE, to_tk_color
+
 
 class RowMenu:
     def __init__(self, parent, on_refresh, on_pause, on_edit, on_delete,
@@ -14,7 +16,15 @@ class RowMenu:
         self.parent = parent
         self._on_delete_raw = on_delete
         self._delete_target = None
-        self.menu = tk.Menu(parent, tearoff=0)
+        # 默认 tk.Menu 是系统灰,在深色窗口旁边非常突兀;配色实时取
+        # PALETTE(菜单是瞬态的,主题切换后下次弹出自然刷新)
+        self.menu = tk.Menu(
+            parent, tearoff=0, bd=0,
+            bg=to_tk_color(PALETTE.CARD),
+            fg=to_tk_color(PALETTE.TEXT),
+            activebackground=to_tk_color(PALETTE.CARD_HOVER),
+            activeforeground=to_tk_color(PALETTE.TEXT),
+        )
         self.menu.add_command(label="立即刷新此行", command=on_refresh)
         self.menu.add_command(label="查看模型列表", command=on_show_models)
         self.menu.add_command(label="试调模型…", command=on_probe)

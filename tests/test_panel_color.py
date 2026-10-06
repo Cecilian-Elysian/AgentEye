@@ -10,10 +10,15 @@ class UsageColor(unittest.TestCase):
         ratio = panel._usage_ratio(r)
         self.assertAlmostEqual(ratio, 13.28 / 30.0, places=4)
 
-    def test_ratio_amount_no_total_falls_back_to_level(self):
+    def test_ratio_amount_no_total_no_pct_is_none(self):
+        """金额行拿不到 used/total 就没有占比。
+
+        旧实现按 level 编一个 0.15/0.55/0.85 的假比例,deepseek
+        余额 ¥5000 和 ¥6 会画出一样长的胶囊;现在是 None,调用方
+        (胶囊/折叠条带)对 None 的处理是不画。
+        """
         r = {"unit": "$", "remaining": 16.72, "level": "warn"}
-        ratio = panel._usage_ratio(r)
-        self.assertEqual(ratio, 0.55)
+        self.assertIsNone(panel._usage_ratio(r))
 
     def test_ratio_percent_inverts(self):
         r = {"unit": "%", "pct": 73, "level": "warn"}
@@ -32,10 +37,12 @@ class UsageColor(unittest.TestCase):
         self.assertEqual(panel._usage_ratio(r), 0.0)
 
     def test_color_endpoints(self):
-        c0 = panel._usage_color(0.0)
-        c1 = panel._usage_color(1.0)
-        self.assertEqual(c0, "#53d77a")
-        self.assertEqual(c1, "#ff5d5d")
+        """端点必须实时取自 PALETTE,主题切换跟着变。"""
+        from ui.theme import PALETTE, to_tk_color
+        self.assertEqual(panel._usage_color(0.0),
+                         to_tk_color(PALETTE.OK).lower())
+        self.assertEqual(panel._usage_color(1.0),
+                         to_tk_color(PALETTE.CRITICAL).lower())
 
     def test_color_midpoint_is_yellow_ish(self):
         c = panel._usage_color(0.5)
@@ -101,8 +108,18 @@ class FmtMain(unittest.TestCase):
         r = {"unit": "¥", "used_today": 1.5, "total": 100.0, "remaining": 23.75}
         self.assertEqual(panel._fmt_main(r), "今日 ¥1.50 / ¥100.00")
 
-    def test_percent_unchanged(self):
-        self.assertEqual(panel._fmt_main({"unit": "%", "pct": 73}), "73%")
+    def test_percent_shows_used(self):
+        """主值与胶囊同口径:写"已用",不写剩余。"""
+        self.assertEqual(panel._fmt_main({"unit": "%", "pct": 73}), "已用 27%")
+
+    def test_percent_used_clamps(self):
+        self.assertEqual(panel._fmt_main({"unit": "%", "pct": 0}), "已用 100%")
+        self.assertEqual(panel._fmt_main({"unit": "%", "pct": 100}), "已用 0%")
+        self.assertEqual(panel._fmt_main({"unit": "%", "pct": 150}), "已用 0%")
+        self.assertEqual(panel._fmt_main({"unit": "%", "pct": -5}), "已用 100%")
+
+    def test_percent_none_is_dash(self):
+        self.assertEqual(panel._fmt_main({"unit": "%", "pct": None}), "-")
 
     def test_unconfigured(self):
         self.assertEqual(panel._fmt_main({"unconfigured": True}), "未配置")

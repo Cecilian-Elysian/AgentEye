@@ -5,9 +5,11 @@ import re
 KEY_PREFIXES = (
     ("sk-cp-", "minimax", "https://api.minimaxi.com", "high",
      "key 以 'sk-cp-' 开头 → MiniMax Coding Plan"),
-    ("ey", "opencode_go", "https://opencode.ai", "medium",
-     "key 以 'ey' 开头疑似 JWT → OpenCode Go"),
 )
+
+# "ey" 开头的三段式 JWT:MiniMax 的 token_plan 普通 key 和 OpenCode Go
+# 的 key 都是这种形态,光看形状分不出来。
+JWT_SHAPE = re.compile(r"^ey[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 
 URL_HOST_HINTS = (
     ("deepseek.com", "deepseek", "https://api.deepseek.com",
@@ -76,6 +78,18 @@ def detect(key="", hint_url=""):
                 "confidence": confidence,
                 "notes": note,
             }
+
+    if JWT_SHAPE.match(key):
+        # 裸前缀 "ey" 会把 MiniMax token_plan 的 JWT 误判成 opencode_go,
+        # 打到 opencode.ai 端点上必然失败。两种 JWT 分不出谁是谁:
+        # 给 opencode_go 默认 URL 但置信度降为 low,让用户核对。
+        return {
+            "kind": "opencode_go",
+            "base_url": "https://opencode.ai",
+            "confidence": "low",
+            "notes": "key 是 JWT 形态,可能是 OpenCode Go,也可能是 MiniMax"
+                     " 的 token_plan key;填 URL 提示可纠正,新增后请核对",
+        }
 
     if key.startswith("sk-"):
         return {

@@ -10,6 +10,16 @@ from pathlib import Path
 CONFIG_PATH = Path.home() / ".agenteye" / "config.json"
 
 
+def _eprint(msg):
+    """带 None 守卫的 stderr 输出。
+
+    pythonw.exe 下 sys.stderr 是 None,裸 write 会 AttributeError,
+    把"隔离损坏配置后按空配置启动"这类本不该失败的路径整个炸掉。
+    """
+    if sys.stderr:
+        sys.stderr.write(msg)
+
+
 class ConfigError(Exception):
     """配置不可用。调用方据此提示用户,不要静默吞掉。"""
 
@@ -280,7 +290,7 @@ def normalize_providers(cfg):
     if isinstance(raw, dict):
         raw = [raw]                      # 少写个中括号,当单条处理
     if not isinstance(raw, list):
-        sys.stderr.write(
+        _eprint(
             f"配置里 providers 不是列表(实际 {type(raw).__name__}),已置空\n")
         cfg["providers"] = []
         return cfg
@@ -291,7 +301,7 @@ def normalize_providers(cfg):
         else:
             bad += 1
     if bad:
-        sys.stderr.write(
+        _eprint(
             f"配置里 providers 有 {bad} 个非对象条目,已丢弃"
             "(provider 必须是 {...} 对象)\n")
     cfg["providers"] = good
@@ -324,9 +334,14 @@ def merge_v2_defaults(base, user):
 
 
 def _quarantine_corrupt_config(reason):
-    """把损坏的 config.json 改名留证,绝不原地覆盖。"""
+    """把损坏的 config.json 改名留证,绝不原地覆盖。
+
+    文件名带 uuid 后缀:时间戳只精确到秒,自动重启器同一秒内二次拉起
+    或双实例同时启动时,第二次隔离会静默覆盖第一次留下的证据。
+    """
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    dest = CONFIG_PATH.with_name(f"config.json.corrupt-{stamp}")
+    dest = CONFIG_PATH.with_name(
+        f"config.json.corrupt-{stamp}-{uuid.uuid4().hex[:6]}")
     try:
         os.replace(CONFIG_PATH, dest)
         return dest
@@ -435,20 +450,27 @@ def load_v2():
         user_cfg = json.loads(_read_config_text())
     except ValueError as e:
         moved = _quarantine_corrupt_config(str(e))
-        sys.stderr.write(
+        _eprint(
             f"config.json 解析失败({e}),已保留为 {moved or '(重命名失败)'}\n"
             "本次以空配置启动且不会覆盖原文件,请检查后手动恢复。\n")
         return copy.deepcopy(V2_TEMPLATE)
 
     if not isinstance(user_cfg, dict):
         moved = _quarantine_corrupt_config("根节点不是对象")
-        sys.stderr.write(
+        _eprint(
             f"config.json 根节点不是对象,已保留为 {moved or '(重命名失败)'}\n")
         return copy.deepcopy(V2_TEMPLATE)
 
     version = user_cfg.get("schema_version")
-    if version == 2:
+    if isinstance(version, int) and not isinstance(version, bool) and version == 2:
         merged = merge_v2_defaults(copy.deepcopy(V2_TEMPLATE), user_cfg)
+        # 手改 "ui": null / "alert": [] 会把整套默认值顶掉:之后
+        # setdefault("ui", {}) 因键已存在拿到 None,save_position 一类
+        # 直接 TypeError,窗口几何/主题永远存不上且无任何提示。
+        # 非 dict 的一律用模板补回(normalize_providers 只护 providers)。
+        for sect in ("ui", "alert"):
+            if not isinstance(merged.get(sect), dict):
+                merged[sect] = copy.deepcopy(V2_TEMPLATE.get(sect) or {})
         normalize_providers(merged)
         # 顺序要紧:先解密成明文,再让环境变量覆盖,否则 env 永远不生效
         _decrypt_providers(merged.get("providers") or [])
@@ -460,11 +482,23 @@ def load_v2():
             f"配置版本 schema_version={version} 高于本程序支持的 2。"
             "请升级 AgentEye,或手动改回 2。")
 
-    # 只有缺版本号 / 1 才走 v1 迁移
-    _backup_v1_encrypted(user_cfg)
-    migrated = migrate_v1_to_v2(user_cfg)
-    normalize_providers(migrated)
-    _decrypt_providers(migrated.get("providers") or [])
-    apply_env_v2(migrated)
-    save_v2(migrated)
-    return migrated
+    # 只有缺版本号 / 整型 1 才走 v1 迁移。版本字段类型不对(手滑写成
+    # "2" 字符串、2.0、true 等)绝不能落进迁移:迁移找不到 v1 分立数组
+    # 会拿空模板 save_v2 覆盖原文件,providers 连同 key_enc 一起丢光,
+    # 而且 .v1.bak 已存在时连备份都不会再做。这里按损坏隔离处理。
+    if version is None or (
+            isinstance(version, int) and not isinstance(version, bool)
+            and version == 1):
+        _backup_v1_encrypted(user_cfg)
+        migrated = migrate_v1_to_v2(user_cfg)
+        normalize_providers(migrated)
+        _decrypt_providers(migrated.get("providers") or [])
+        apply_env_v2(migrated)
+        save_v2(migrated)
+        return migrated
+
+    moved = _quarantine_corrupt_config(
+        f"schema_version 类型异常: {version!r}")
+    _eprint(f"config.json 的 schema_version 类型异常({version!r}),"
+            f"已保留为 {moved or '(重命名失败,本次不会覆盖原文件)'}\n")
+    return copy.deepcopy(V2_TEMPLATE)

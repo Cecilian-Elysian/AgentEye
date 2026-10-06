@@ -17,6 +17,7 @@ import weakref
 
 from ui.theme import PALETTE, Layout, usage_color, bind_theme_listener, to_tk_color, to_tk_color_blended
 from ui.fonts import fonts
+from ui.panel import _usage_ratio, _rounded_points
 
 # 活着且还在跑 1Hz 定时器的 EssentialBar。测试之间由 conftest 统一
 # stop(),生产代码不需要读它。
@@ -56,23 +57,13 @@ def _short_countdown(sec):
 
 
 def _row_ratio(result):
-    """返回单行消耗比 0..1,与 panel._usage_ratio 同语义。"""
-    if result.get("unconfigured") or result.get("error"):
-        return None
-    unit = result.get("unit") or ""
-    used = result.get("used")
-    used_today = result.get("used_today")
-    total = result.get("total")
-    pct = result.get("pct")
-    if unit in ("$", "¥", "额度") and isinstance(total, (int, float)) and total > 0:
-        if isinstance(used_today, (int, float)):
-            return max(0.0, min(1.0, used_today / total))
-        if isinstance(used, (int, float)):
-            return max(0.0, min(1.0, used / total))
-    if unit == "%" and isinstance(pct, (int, float)):
-        return max(0.0, min(1.0, (100 - pct) / 100))
-    level = result.get("level", "ok")
-    return {"ok": 0.15, "warn": 0.55, "critical": 0.85}.get(level, 0.15)
+    """返回单行消耗比 0..1。
+
+    委托 panel._usage_ratio,两份视图共用同一套口径。
+    之前这里有一份手工拷贝,panel 删掉 level 假值后两边会漂移,
+    折叠态与展开态会对同一份数据画出不同的胶囊。
+    """
+    return _usage_ratio(result)
 
 
 def _worst(results):
@@ -118,8 +109,13 @@ def _main_value(row):
             return f"{prefix}{unit}{rem:,.2f}", ""
         return "—", "—"
     if unit == "%":
+        # 与 Panel._fmt_main 同口径:pct 字段存的是"剩余",主值写
+        # "已用";条带颜色也按已消耗取色,两边方向一致
         pct = row.get("pct")
-        return _fmt_pct(pct), ""
+        if isinstance(pct, (int, float)) and not isinstance(pct, bool):
+            used = max(0, min(100, 100.0 - float(pct)))
+            return f"已用 {used:.0f}%", ""
+        return "-", ""
     rem = row.get("remaining")
     if rem is not None:
         return f"{prefix}{rem:,.2f}{unit}", ""
@@ -205,9 +201,12 @@ class EssentialBar:
         )
         self.bar_canvas.pack(side="left", fill="x", expand=True)
 
-        self.bar_rect = self.bar_canvas.create_rectangle(
-            0, 0, 0, Layout.BAR_HEIGHT, outline="", fill=PALETTE.GREEN,
-        )
+        # 与展开面板的行内条同款胶囊(12 点圆角),直角矩形版废弃
+        poly_kw = {"outline": "", "width": 0, "smooth": True,
+                   "splinesteps": 12}
+        self.bar_track = self.bar_canvas.create_polygon(0, 0, 0, 0, **poly_kw)
+        self.bar_rect = self.bar_canvas.create_polygon(
+            0, 0, 0, 0, **dict(poly_kw, state="hidden"))
         self.bar_canvas.bind(
             "<Configure>",
             lambda e: self._on_bar_configure(e),
@@ -223,6 +222,9 @@ class EssentialBar:
         self._last_bar_width = 0
         self._last_bar_color = PALETTE.GREEN
         self._last_bar_frac = 0.0
+        self._disp_frac = None
+        self._bar_target = 0.0
+        self._animating = False
 
         self.frame.bind("<Button-1>", self._on_click)
         for w in (top, self.value_lbl, self.sub_lbl, self.pct_lbl,
@@ -265,6 +267,10 @@ class EssentialBar:
             except (tk.TclError, AttributeError):
                 pass
             self.bar_canvas.configure(bg=PALETTE.BAR_BG)
+            try:
+                self.bar_canvas.itemconfig(self.bar_track, fill=PALETTE.BAR_BG)
+            except (tk.TclError, AttributeError):
+                pass
         except tk.TclError:
             pass
         self._update()
@@ -286,10 +292,24 @@ class EssentialBar:
     def _redraw_bar(self):
         if self._last_bar_width < 2:
             return
+        h = Layout.BAR_HEIGHT
+        r = h / 2.0
+        w = self._last_bar_width
         try:
-            x2 = int(self._last_bar_width * self._last_bar_frac)
-            self.bar_canvas.coords(self.bar_rect, 0, 0, x2, Layout.BAR_HEIGHT)
-            self.bar_canvas.itemconfig(self.bar_rect, fill=self._last_bar_color)
+            self.bar_canvas.coords(self.bar_track,
+                                   *_rounded_points(0, 0, w, h, r))
+            self.bar_canvas.itemconfig(self.bar_track, fill=PALETTE.BAR_BG,
+                                       state="normal")
+            x2 = int(w * self._last_bar_frac)
+            if x2 < 2 * r:
+                # 不足一个圆头直径不画,与行内条同一策略
+                self.bar_canvas.itemconfig(self.bar_rect, state="hidden")
+            else:
+                self.bar_canvas.coords(self.bar_rect,
+                                       *_rounded_points(0, 0, x2, h, r))
+                self.bar_canvas.itemconfig(self.bar_rect,
+                                           fill=self._last_bar_color,
+                                           state="normal")
         except tk.TclError:
             pass
 
@@ -299,7 +319,9 @@ class EssentialBar:
             if not self.frame.winfo_exists():
                 return
             self._update()
-            self._tick_after_id = self.frame.after(1000, self._tick)
+            # 条在缓动动画中 → 33ms 快 tick,收敛后回 1Hz
+            delay = 33 if self._animating else 1000
+            self._tick_after_id = self.frame.after(delay, self._tick)
         except tk.TclError:
             pass
 
@@ -320,31 +342,41 @@ class EssentialBar:
                      r.get("remaining"), r.get("total"),
                      r.get("used_today"), r.get("pct"),
                      r.get("reset_at")) for r in results)
-        if sig == self._sig:
-            self._update_countdown(results)
-            return
-        self._sig = sig
+        if sig != self._sig:
+            self._sig = sig
 
-        worst, ratio = _worst(results)
-        self._current_worst_name = worst.get("name") if worst else None
-        color = usage_color(ratio) if ratio is not None else PALETTE.GREY
+            worst, ratio = _worst(results)
+            self._current_worst_name = worst.get("name") if worst else None
+            color = usage_color(ratio) if ratio is not None else PALETTE.GREY
 
-        main, sub = _main_value(worst)
-        pct_text = ""
-        if worst is not None:
-            pct = worst.get("pct")
-            if isinstance(pct, (int, float)):
-                pct_text = _fmt_pct(pct)
-        self.value_lbl.config(text=main, fg=color)
-        self.sub_lbl.config(text=sub, fg=to_tk_color_blended(PALETTE.TEXT_DIM))
-        self.pct_lbl.config(text=pct_text, fg=color)
+            main, sub = _main_value(worst)
+            pct_text = ""
+            if worst is not None:
+                pct = worst.get("pct")
+                if isinstance(pct, (int, float)) and not isinstance(pct, bool):
+                    pct_text = _fmt_pct(pct)
+            self.value_lbl.config(text=main, fg=color)
+            self.sub_lbl.config(text=sub, fg=to_tk_color_blended(PALETTE.TEXT_DIM))
+            self.pct_lbl.config(text=pct_text, fg=color)
 
-        self._last_bar_color = color
-        self._last_bar_frac = ratio if ratio is not None else 0.0
-        self._redraw_bar()
+            self._last_bar_color = color
+            self._bar_target = ratio if ratio is not None else 0.0
 
-        self._last_countdown_results = results
         self._update_countdown(results)
+
+        # 条的宽度朝目标缓动:数据跳变时滑过去,不再瞬移;
+        # 颜色只在 sig 变化时更新,动画期间保持
+        target = getattr(self, "_bar_target", 0.0)
+        disp = getattr(self, "_disp_frac", None)
+        if disp is None:
+            disp = target
+        else:
+            diff = target - disp
+            disp = target if abs(diff) <= 0.0025 else disp + diff * 0.35
+        self._disp_frac = disp
+        self._animating = disp != target
+        self._last_bar_frac = disp
+        self._redraw_bar()
 
     def _update_countdown(self, results):
         if not results:

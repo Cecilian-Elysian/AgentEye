@@ -1,5 +1,6 @@
 """Model 详情弹窗:展示 provider 的模型列表 + 搜索 + 分组 + 试调。"""
 
+import queue
 import threading
 import time
 import tkinter as tk
@@ -43,6 +44,10 @@ class ModelPanel(MacToplevel):
         self.on_reorder = on_reorder
         self.on_after_reorder = on_after_reorder
         self._drag = None
+        self._probing = set()
+        self.probe_btns = {}
+        self._probe_results = queue.Queue()
+        self._pump_scheduled = False
 
         BG = to_tk_color(PALETTE.CARD)
         FG = to_tk_color(PALETTE.TEXT)
@@ -233,10 +238,13 @@ class ModelPanel(MacToplevel):
                              bg=BG_FIELD, fg=DIM, font=(FONT[0], 8),
                              width=12, anchor="e").pack(
                         side="right", padx=4)
-                    tk.Button(row, text="试调", font=(FONT[0], 8),
-                              bg=BTN_BG, fg=FG, relief="flat",
-                              command=lambda model=m: self._probe(model)).pack(
-                        side="right", padx=4, pady=2)
+                    probe_btn = tk.Button(row, text="试调", font=(FONT[0], 8),
+                                          bg=BTN_BG, fg=FG, relief="flat",
+                                          command=lambda model=m: self._probe(model))
+                    if m in self._probing:
+                        probe_btn.config(state="disabled")
+                    probe_btn.pack(side="right", padx=4, pady=2)
+                    self.probe_btns[m] = probe_btn
                 select_btn = tk.Label(row, text="估算", font=(FONT[0], 8),
                                       bg=BTN_BG, fg=FG, cursor="hand2")
                 select_btn.pack(side="right", padx=(0, 4), pady=2)
@@ -385,8 +393,41 @@ class ModelPanel(MacToplevel):
     def _probe(self, model):
         if not self.on_probe:
             return
+        # 同一模型在途时再点:两个请求竞速,结果标签互相覆盖,且双倍
+        # 计费;禁用按钮 + 去重集合双保险
+        if model in self._probing:
+            return
+        self._probing.add(model)
+        btn = self.probe_btns.get(model)
+        if btn is not None:
+            try:
+                btn.config(state="disabled")
+            except tk.TclError:
+                pass
+        self._schedule_pump()
         threading.Thread(target=self._probe_worker, args=(model,),
                          daemon=True).start()
+
+    def _schedule_pump(self):
+        """在主线程排一个结果队列清理回调。窗口已销毁时静默放弃。"""
+        if self._pump_scheduled:
+            return
+        self._pump_scheduled = True
+        try:
+            self.after(80, self._drain_probe_results)
+        except tk.TclError:
+            self._pump_scheduled = False
+
+    def _drain_probe_results(self):
+        self._pump_scheduled = False
+        try:
+            while True:
+                model, ok, lat, err = self._probe_results.get_nowait()
+                self._probe_done(model, ok, lat, err)
+        except queue.Empty:
+            pass
+        if self._probing or not self._probe_results.empty():
+            self._schedule_pump()
 
     def _select_model(self, model):
         self._last_selected = model
@@ -402,13 +443,20 @@ class ModelPanel(MacToplevel):
             ok, latency_ms, error = self.on_probe(model)
         except Exception as e:
             ok, latency_ms, error = False, 0, str(e)
-        try:
-            self.after(0, self._probe_done, model, ok, latency_ms, error)
-        except tk.TclError:
-            # 窗口在试调期间被关掉:结果没处展示,静默放弃
-            pass
+        # tkinter 的 after/createcommand 不允许在工作线程调用
+        # (RuntimeError: main thread is not in main loop),原实现只捕
+        # TclError:试调结果静默丢失,按钮/标签永远不更新。结果进队列,
+        # 主线程经 _drain_probe_results 取走。
+        self._probe_results.put((model, ok, latency_ms, error))
 
     def _probe_done(self, model, ok, latency_ms, error):
+        self._probing.discard(model)
+        btn = self.probe_btns.get(model)
+        if btn is not None:
+            try:
+                btn.config(state="normal")
+            except tk.TclError:
+                pass
         mark = "✓" if ok else "✗"
         msg = f"{mark} {latency_ms:.0f}ms" if ok else f"✗ {error}"
         var = (getattr(self, "probe_result_vars", None) or {}).get(model)

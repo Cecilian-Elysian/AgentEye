@@ -121,10 +121,13 @@ def fetch(entry):
         return {"error": "响应非 JSON"}
 
     # 接口级报错必须在解析 items 之前判:不然错误体里的残留字段会被
-    # 当成正常数据,报出莫名的"结构未识别"或假额度。
-    status_code = (body.get("base_resp") or {}).get("status_code")
+    # 当成正常数据,报出莫名的"结构未识别"或假额度。base_resp 偶发
+    # 回成非 dict(网关错误页),先收型再 .get
+    base_resp = body.get("base_resp")
+    base_resp = base_resp if isinstance(base_resp, dict) else {}
+    status_code = base_resp.get("status_code")
     if status_code not in (None, 0):
-        return {"error": f"接口报错: {(body.get('base_resp') or {}).get('status_msg', status_code)}"}
+        return {"error": f"接口报错: {base_resp.get('status_msg', status_code)}"}
 
     items = _extract_items(body)
     if not items:
@@ -172,8 +175,11 @@ def fetch(entry):
             return {"error": "无百分比字段"}
         pct = percents[0]
 
+    # headline 决定主值 pct 与重置时间,detail 首段必须就是它,
+    # 否则主值数字与紧邻文案指向不同模型,数字对不上。
+    ordered = [headline] + [p for p in parsed if p is not headline]
     parts = []
-    for p in parsed[:3]:
+    for p in ordered[:3]:
         seg = str(p["name"])
         if p["total_n"]:
             try:

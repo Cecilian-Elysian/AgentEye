@@ -290,6 +290,7 @@ class Layout:
     RADIUS_BAR = 4
 
     BAR_HEIGHT = 6
+    ROW_BAR_HEIGHT = 12
     PAD = 10
     PAD_X = 12
     PAD_Y = 8

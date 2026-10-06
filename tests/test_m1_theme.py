@@ -115,7 +115,9 @@ class TestVibrancyPlatformBranch(unittest.TestCase):
         self.assertTrue(hasattr(vibrancy, "apply_windows_system_backdrop"))
         self.assertTrue(hasattr(vibrancy, "apply_windows_layered_alpha"))
         self.assertTrue(hasattr(vibrancy, "apply_window_chrome"))
-        self.assertTrue(hasattr(vibrancy, "get_hwnd"))
+        # get_hwnd 曾是死代码(无任何调用方),已删除;留着只会引诱
+        # 后人写出第二份 hwnd 获取逻辑
+        self.assertFalse(hasattr(vibrancy, "get_hwnd"))
 
     def test_is_windows_11_or_later_returns_bool(self):
         from ui.vibrancy import is_windows_11_or_later

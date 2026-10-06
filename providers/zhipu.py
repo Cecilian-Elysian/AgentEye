@@ -57,8 +57,11 @@ def fetch(entry):
     except ValueError:
         return {"error": "响应非 JSON"}
 
-    if body.get("code") not in (None, 200) or body.get("success") is False:
-        return {"error": f"接口报错: {body.get('msg') or body.get('code')}"}
+    # 智谱个别网关把 code 回成字符串 "200",直接 not in (None, 200)
+    # 会把成功响应判成接口报错
+    code = body.get("code")
+    if (code is not None and str(code) != "200") or body.get("success") is False:
+        return {"error": f"接口报错: {body.get('msg') or code}"}
 
     data = body.get("data") or {}
     limits = data.get("limits") or []
@@ -70,20 +73,24 @@ def fetch(entry):
     if not token_limits:
         return {"error": "无 token 额度窗口"}
 
-    parts = []
-    remaining = []
+    segs = []
     for l in token_limits:
         label = WINDOW_LABELS.get(
             (l.get("unit"), l.get("number")), f"{l.get('number')}·u{l.get('unit')}"
         )
         used = float(l["percentage"])
         rem = max(0.0, 100.0 - used)
-        remaining.append(rem)
         seg = f"{label} 剩{rem:.0f}%"
         reset = _fmt_reset_abs(l.get("nextResetTime"))
         if reset:
             seg += f"(重置{reset})"
-        parts.append(seg)
+        segs.append((rem, seg))
+
+    # 主值 pct 取的是 min(各窗口剩余),detail 首段必须指向同一个窗口,
+    # 否则会出现"已用 27%"挨着"5h 剩 97%"这种主值与文案错位的显示。
+    segs.sort(key=lambda t: t[0])
+    remaining = [rem for rem, _seg in segs]
+    parts = [seg for _rem, seg in segs]
 
     level = data.get("level")
     detail = " · ".join(parts)

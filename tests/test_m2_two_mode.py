@@ -34,10 +34,15 @@ class TestEssentialBarPure(unittest.TestCase):
 
     def test_worst_picks_max_ratio(self):
         from ui.essential_bar import _worst
+        # used 必须显式给:_usage_ratio 删掉 level 假值后,
+        # 只有 remaining/total 没有 used 的行拿不到占比,会被 _worst 跳过。
         results = [
-            {"name": "A", "level": "ok", "unit": "$", "remaining": 10, "total": 10},
-            {"name": "B", "level": "warn", "unit": "$", "remaining": 2, "total": 10},
-            {"name": "C", "level": "critical", "unit": "$", "remaining": 1, "total": 10},
+            {"name": "A", "level": "ok", "unit": "$",
+             "remaining": 10, "used": 0, "total": 10},
+            {"name": "B", "level": "warn", "unit": "$",
+             "remaining": 2, "used": 8, "total": 10},
+            {"name": "C", "level": "critical", "unit": "$",
+             "remaining": 1, "used": 9, "total": 10},
         ]
         row, ratio = _worst(results)
         self.assertEqual(row["name"], "C")
@@ -46,7 +51,8 @@ class TestEssentialBarPure(unittest.TestCase):
     def test_worst_skips_unconfigured(self):
         from ui.essential_bar import _worst
         results = [
-            {"name": "A", "level": "ok", "unit": "$", "remaining": 5, "total": 10},
+            {"name": "A", "level": "ok", "unit": "$",
+             "remaining": 5, "used": 5, "total": 10},
             {"name": "B", "unconfigured": True},
             {"name": "C", "error": "timeout"},
         ]
@@ -72,10 +78,11 @@ class TestEssentialBarPure(unittest.TestCase):
         self.assertEqual(sub, "$10.00")
 
     def test_main_value_percent(self):
+        """与 Panel._fmt_main 同口径:pct 存剩余,主值写已用。"""
         from ui.essential_bar import _main_value
         row = {"unit": "%", "pct": 62}
         main, sub = _main_value(row)
-        self.assertEqual(main, "62%")
+        self.assertEqual(main, "已用 38%")
         self.assertEqual(sub, "")
 
     def test_main_value_none(self):
