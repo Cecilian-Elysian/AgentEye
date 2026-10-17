@@ -26,7 +26,11 @@ import tkinter as tk
 from tkinter import messagebox
 
 from providers import detect as detect_mod
-from ui.theme import PALETTE, bind_theme_listener, to_tk_color, to_tk_color_blended
+from ui.theme import (PALETTE, Layout, Typography, bind_theme_listener,
+                      to_tk_color, to_tk_color_blended)
+from ui.fonts import pick_ui_family
+from ui.paint import (FlatButton, FocusEntry, FocusText, hairline,
+                      bind_hover_bg)
 
 
 PRESETS = [
@@ -37,11 +41,7 @@ PRESETS = [
     ("中转站",     "relay",       ""),
 ]
 
-FONT = "Microsoft YaHei UI"
-
-# 旧版本写死的占位灰。主题重刷时用来把还挂着旧色的控件归一到 DIM;
-# 新代码一律走 to_tk_color_blended(PALETTE.TEXT_DIM)。
-_LEGACY_PLACEHOLDER = "#8B8B9E"
+FONT = pick_ui_family()
 
 
 class AddKeyForm(tk.Frame):
@@ -73,113 +73,98 @@ class AddKeyForm(tk.Frame):
     # ---------- 配色 ----------
 
     def refresh_palette(self, *_args):
-        """主题切换时重画表单配色。"""
+        """主题切换时重画表单配色。
+
+        逐个控件问它自己"新配色是什么",不再 walk 子树靠读当前 fg/bg
+        猜语义——那套要靠 `#8B8B9E` 这类历史色值当哨兵,主题一变哨兵就失效,
+        结果是浅色主题下标签和输入框停在旧色。
+        """
         try:
             if not self.winfo_exists():
                 return
         except tk.TclError:
             return
+        bg = to_tk_color(PALETTE.BG)
         try:
-            self._walk_recolor(self)
+            self.configure(bg=bg)
+            for w in self.winfo_children():
+                self._walk_refresh(w, bg)
         except tk.TclError:
             pass
 
-    def _walk_recolor(self, w):
-        BG = to_tk_color(PALETTE.BG)
-        BG_FIELD = to_tk_color(PALETTE.BAR_BG)
-        FG = to_tk_color(PALETTE.TEXT)
-        DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
-        BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
-        BTN_HOVER = to_tk_color(PALETTE.CARD_PRESSED)
-        OK = to_tk_color(PALETTE.OK)
-        FG_ON_OK = to_tk_color(PALETTE.BG)
-
-        try:
-            cls = w.winfo_class()
-            if cls in ("Frame", "Toplevel"):
-                w.configure(bg=BG)
-            elif cls == "Label":
-                fg = str(w.cget("fg") or "").upper()
-                if fg in (DIM.upper(), _LEGACY_PLACEHOLDER):
-                    w.configure(bg=BG, fg=DIM)
-                elif fg == OK.upper():
-                    w.configure(bg=BG, fg=OK)
-                else:
-                    w.configure(bg=BG, fg=FG)
-            elif cls == "Entry":
-                w.configure(bg=BG_FIELD, fg=FG, insertbackground=FG)
-            elif cls == "Button":
-                fg = str(w.cget("fg") or "").upper()
-                if fg == FG_ON_OK.upper():
-                    w.configure(bg=OK, fg=FG_ON_OK)
-                else:
-                    w.configure(bg=BTN_BG, fg=FG)
-        except tk.TclError:
-            pass
+    def _walk_refresh(self, w, bg):
+        refresh = getattr(w, "refresh_palette", None)
+        if callable(refresh):
+            try:
+                refresh()
+            except tk.TclError:
+                pass
+        else:
+            try:
+                if w.winfo_class() in ("Frame", "Toplevel", "Label"):
+                    w.configure(bg=bg)
+            except tk.TclError:
+                pass
         for c in w.winfo_children():
-            self._walk_recolor(c)
+            self._walk_refresh(c, bg)
 
     # ---------- UI ----------
 
     def _build_ui(self, current_count):
-        PAD = {"padx": 12, "pady": 6}
-        BG = to_tk_color(PALETTE.BG)
-        FG = to_tk_color(PALETTE.TEXT)
-        DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
-        BG_FIELD = to_tk_color(PALETTE.BAR_BG)
-        BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
-        BTN_HOVER = to_tk_color(PALETTE.CARD_PRESSED)
-        OK = to_tk_color(PALETTE.OK)
-        FG_ON_OK = to_tk_color(PALETTE.BG)
+        bg = to_tk_color(PALETTE.BG)
+        fg = to_tk_color(PALETTE.TEXT)
+        dim = to_tk_color_blended(PALETTE.TEXT_DIM)
 
-        top_row = tk.Frame(self, bg=BG)
-        top_row.pack(fill="x", padx=4, pady=(0, 4))
+        top_row = tk.Frame(self, bg=bg)
+        top_row.pack(fill="x", pady=(0, Layout.ROW_GAP))
         count_text = f"当前已配置 {current_count} 个" if self._show_count else ""
-        tk.Label(top_row, text=count_text, bg=BG, fg=DIM,
-                 font=(FONT, 9)).pack(side="right")
+        tk.Label(top_row, text=count_text, bg=bg, fg=dim,
+                 font=(FONT, Typography.DETAIL_SIZE)).pack(side="right")
 
         if self._show_presets:
-            tk.Label(self, text="快速选择", bg=BG, fg=DIM,
-                     font=(FONT, 10)).pack(anchor="w", padx=4, pady=(2, 4))
-            preset_frame = tk.Frame(self, bg=BG)
-            preset_frame.pack(anchor="w", padx=4)
+            tk.Label(self, text="快速选择", bg=bg, fg=dim,
+                     font=(FONT, Typography.BODY_SIZE)).pack(anchor="w",
+                                                            pady=(2, Layout.ROW_GAP))
+            preset_frame = tk.Frame(self, bg=bg)
+            preset_frame.pack(anchor="w")
             for label, kind, url in PRESETS:
-                b = tk.Label(preset_frame, text=label, font=(FONT, 9),
-                             bg=BTN_BG, fg=FG, padx=10, pady=4, cursor="hand2")
+                b = FlatButton(preset_frame, text=label, variant="chip",
+                               font=(FONT, Typography.BODY_SIZE),
+                               padx=10, pady=3)
                 b.pack(side="left", padx=(0, 6))
                 b.bind("<Button-1>",
-                       lambda e, k=kind, u=url, lbl=label: self._apply_preset(k, u, lbl))
-                b.bind("<Enter>", lambda e, w=b: w.config(bg=BTN_HOVER))
-                b.bind("<Leave>", lambda e, w=b: w.config(bg=BTN_BG))
+                       lambda e, k=kind, u=url, lbl=label: self._apply_preset(k, u, lbl),
+                       add="+")
 
-        row_url = tk.Frame(self, bg=BG)
-        row_url.pack(fill="x", pady=(8, 0))
-        tk.Label(row_url, text="Base URL (可选)", bg=BG, fg=DIM,
-                 font=(FONT, 10)).pack(side="left")
+        row_url = tk.Frame(self, bg=bg)
+        row_url.pack(fill="x", pady=(Layout.PAD_Y, 0))
+        tk.Label(row_url, text="Base URL (可选)", bg=bg, fg=dim,
+                 font=(FONT, Typography.BODY_SIZE)).pack(side="left")
+        # 探测先 pack(right):pack 按创建顺序分配空间,后创建的条目拿到
+        # 剩余宽度 —— 反过来的话探测会挤掉 URL 输入框,两个框宽度不一致。
+        self.detect_btn = FlatButton(row_url, text="探测", variant="chip",
+                                    on_click=self._probe_now,
+                                    font=(FONT, Typography.BODY_SIZE))
+        self.detect_btn.pack(side="right", padx=(8, 0))
         self.url_var = tk.StringVar()
-        self.url_entry = tk.Entry(row_url, textvariable=self.url_var, width=36,
-                                  bg=BG_FIELD, fg=FG, insertbackground=FG,
-                                  font=(FONT, 10), relief="flat")
+        self.url_entry = FocusEntry(row_url, textvariable=self.url_var,
+                                    font=(FONT, Typography.BODY_SIZE))
         self.url_entry.pack(side="left", padx=8, fill="x", expand=True)
-        self.url_entry.insert(0, "")
-        self.url_entry.config(foreground=DIM)
         self._url_placeholder = False
         self.url_entry.bind("<FocusIn>", self._url_focus_in)
         self.url_entry.bind("<FocusOut>", self._url_focus_out)
         self.url_entry.bind("<FocusOut>", lambda e: self._schedule_probe(), add="+")
 
-        row_key = tk.Frame(self, bg=BG)
-        row_key.pack(fill="x", pady=(4, 0))
-        tk.Label(row_key, text="API Key", bg=BG, fg=FG,
-                 font=(FONT, 10)).pack(side="left")
+        row_key = tk.Frame(self, bg=bg)
+        row_key.pack(fill="x", pady=(Layout.ROW_GAP, 0))
+        tk.Label(row_key, text="API Key", bg=bg, fg=fg,
+                 font=(FONT, Typography.BODY_SIZE)).pack(side="left")
         self.key_var = tk.StringVar()
-        self.key_entry = tk.Entry(row_key, textvariable=self.key_var, width=36,
-                                  bg=BG_FIELD, fg=FG,
-                                  insertbackground=FG, font=(FONT, 10),
-                                  relief="flat")
+        self.key_entry = FocusEntry(row_key, textvariable=self.key_var,
+                                    font=(FONT, Typography.BODY_SIZE))
         self.key_entry.pack(side="left", padx=8, fill="x", expand=True)
         self.key_entry.insert(0, "sk-... 粘贴 key")
-        self.key_entry.config(foreground=DIM)
+        self.key_entry.config(foreground=dim)
         self._key_placeholder = True
         self.key_entry.bind("<FocusIn>", self._key_focus_in)
         self.key_entry.bind("<FocusOut>", self._key_focus_out)
@@ -188,36 +173,30 @@ class AddKeyForm(tk.Frame):
         self.key_entry.bind("<Return>", lambda e: self._save()
                             if str(self.save_btn["state"]) == "normal" else None)
 
-        self.detect_btn = tk.Button(row_url, text="探测", command=self._probe_now,
-                                    bg=BTN_BG, fg=FG, relief="flat",
-                                    activebackground=BTN_HOVER, font=(FONT, 10))
-        self.detect_btn.pack(side="right", padx=(8, 0))
+        hairline(self).pack(fill="x", pady=(Layout.PAD_Y, Layout.ROW_GAP))
 
-        sep = tk.Frame(self, height=1, bg=BTN_HOVER)
-        sep.pack(fill="x", pady=(8, 4))
+        tk.Label(self, text="识别结果", bg=bg, fg=dim,
+                 font=(FONT, Typography.BODY_SIZE)).pack(anchor="w")
+        self.preview = FocusText(self, height=7,
+                                 font=(FONT, Typography.DETAIL_SIZE),
+                                 wrap="word", state="disabled")
+        self.preview.pack(fill="x", pady=(2, Layout.ROW_GAP))
 
-        tk.Label(self, text="识别结果", bg=BG, fg=DIM,
-                 font=(FONT, 10)).pack(anchor="w", padx=4)
-        self.preview = tk.Text(self, height=7, bg=BG_FIELD, fg=FG,
-                               font=(FONT, 9), relief="flat",
-                               wrap="word", state="disabled")
-        self.preview.pack(fill="x", padx=4, pady=(2, 4))
-
-        row_name = tk.Frame(self, bg=BG)
-        row_name.pack(fill="x", pady=(2, 0))
-        tk.Label(row_name, text="显示名称", bg=BG, fg=FG,
-                 font=(FONT, 10)).pack(side="left")
+        row_name = tk.Frame(self, bg=bg)
+        row_name.pack(fill="x", pady=(Layout.ROW_GAP, 0))
+        tk.Label(row_name, text="显示名称", bg=bg, fg=fg,
+                 font=(FONT, Typography.BODY_SIZE)).pack(side="left")
         self.name_var = tk.StringVar()
-        tk.Entry(row_name, textvariable=self.name_var, width=36,
-                 bg=BG_FIELD, fg=FG, insertbackground=FG,
-                 font=(FONT, 10), relief="flat").pack(
-            side="left", padx=8, fill="x", expand=True)
+        self.name_entry = FocusEntry(row_name, textvariable=self.name_var,
+                                     font=(FONT, Typography.BODY_SIZE))
+        self.name_entry.pack(side="left", padx=8, fill="x", expand=True)
 
-        btn_frame = tk.Frame(self, bg=BG)
-        btn_frame.pack(fill="x", pady=(10, 0))
-        self.save_btn = tk.Button(btn_frame, text="保存", command=self._save,
-                                  bg=OK, fg=FG_ON_OK, relief="flat",
-                                  font=(FONT, 10), width=10, state="disabled")
+        btn_frame = tk.Frame(self, bg=bg)
+        btn_frame.pack(fill="x", pady=(Layout.PAD, 0))
+        self.save_btn = FlatButton(btn_frame, text="保存", variant="solid",
+                                   on_click=self._save, width=10,
+                                   font=(FONT, Typography.BODY_SIZE),
+                                   state="disabled")
         self.save_btn.pack(side="right")
 
         self._set_preview("等待输入 key …")

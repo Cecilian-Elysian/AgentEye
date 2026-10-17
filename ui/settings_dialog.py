@@ -29,7 +29,11 @@ import tkinter as tk
 from tkinter import messagebox
 
 from config import plain_key
-from ui.theme import PALETTE, set_theme, current_choice, to_tk_color, to_tk_color_blended
+from ui.theme import (PALETTE, Layout, Typography, set_theme, current_choice,
+                      to_tk_color, to_tk_color_blended)
+from ui.fonts import pick_ui_family
+from ui.paint import (FlatButton, FocusEntry, RadioPill, hairline,
+                      bind_hover_bg, bind_wheel_tree, tag_subtree, wheel_tag)
 from ui.mac_toplevel import MacToplevel
 from ui.scrollbar_style import make_dark_scrollbar
 
@@ -45,36 +49,19 @@ KIND_LABELS = {
     "generic_openai": "OpenAI 兼容",
 }
 
-FONT = "Microsoft YaHei UI"
-# 旧版本写死的占位灰,主题重刷时用来归一;新代码走 TEXT_DIM
-_LEGACY_PLACEHOLDER = "#8B8B9E"
-BG = to_tk_color(PALETTE.BG)
-BG_FIELD = to_tk_color(PALETTE.BAR_BG)
-FG = to_tk_color(PALETTE.TEXT)
-DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
-BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
-
-
-def _refresh_settings_palette():
-    """主题切换时同步本模块的颜色常量。"""
-    global BG, BG_FIELD, FG, DIM, BTN_BG
-    BG = to_tk_color(PALETTE.BG)
-    BG_FIELD = to_tk_color(PALETTE.BAR_BG)
-    FG = to_tk_color(PALETTE.TEXT)
-    DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
-    BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
+FONT = pick_ui_family()
 
 
 # 3 个保留设置项(label / cfg path / 提示 / lo / hi / vtype)
 ROWS = [
     ("刷新间隔(秒)", "refresh_interval_sec",
-     "轮询各 provider 的周期;15–3600",
+     "轮询周期 15–3600",
      15, 3600, "int"),
     ("金额临界阈值(¥)", "alert.critical_amount_yuan",
-     "人民币剩余金额 ≤ 此值时显示红色;0–100000",
+     "余额 ≤ 此值显示红色 0–100000",
      0.0, 100000.0, "float"),
     ("百分比告警阈值(%)", "alert.warn_pct",
-     "剩余百分比 ≤ 此值时显示橙色;1–99",
+     "剩余 ≤ 此值显示橙色 1–99",
      1, 99, "int"),
 ]
 
@@ -109,9 +96,9 @@ class SettingsDialog(MacToplevel):
         self._body_inner = None
         self._center = None
         self._list_canvas = None
-        self._wheel_bound = False
+        self._unbind_wheel = None
 
-        self._holder = tk.Frame(self.body, bg=BG)
+        self._holder = tk.Frame(self.body, bg=to_tk_color(PALETTE.BG))
         self._holder.pack(fill="both", expand=True)
 
         self._init_vars()
@@ -134,9 +121,8 @@ class SettingsDialog(MacToplevel):
 
         self.goto(initial_view)
 
-        # 本模块的 BG/FG 等是 import 时求值的快照(见 _refresh_settings_palette)。
-        # 用户在浅色主题下打开设置时,构造期用的还是深色快照,首帧会闪一排
-        # 深色框。构造完主动刷一次,与 Panel.__init__ 末尾的做法一致。
+        # 本模块不再持有 import 期的颜色快照,配色全部现取 PALETTE;
+        # 构造完仍主动刷一次,让浅色主题下首帧就是浅色。
         self.refresh_palette()
 
     # ---------- 公共 ----------
@@ -193,21 +179,23 @@ class SettingsDialog(MacToplevel):
             pass
 
     def refresh_palette(self):
-        """主题切换时同步本地常量 + 用新配色重建中间区(列表模式)。"""
-        _refresh_settings_palette()
+        """主题切换:用新配色重建中间区(列表模式)+ 逐控件自刷新。
+
+        旧实现靠 walk 子树读当前 fg/bg 猜语义,再靠 `#8B8B9E` 这类历史
+        色值当哨兵判断"这是次要文字还是正文"。哨兵跟着主题一起失效,
+        于是浅色主题下次要文字被刷成正文色、输入框停在深色快照。
+        现在每个控件自己报"新配色是什么",加控件时这里不用改。
+        """
         try:
             center = getattr(self, "_center", None)
             if center is not None and self._form is None:
                 self._swap_center_list()
             self._apply_colors_to_tree()
-            # 分隔线被 _apply_colors_to_tree 当普通 Frame 刷成背景色,单独补涂
-            if getattr(self, "_sep", None) is not None:
-                self._sep.config(bg=DIM)
         except tk.TclError:
             pass
 
     def _apply_colors_to_tree(self, root=None):
-        """遍历当前视图子树,按 widget class 套用 PALETTE 配色。
+        """遍历当前视图子树,让每个控件自己重算配色。
 
         中间区(_center)子树跳过 —— 列表模式由 refresh_palette 整体重建,
         表单模式 AddKeyForm 自己注册了 on_theme_change,自管配色。
@@ -221,46 +209,22 @@ class SettingsDialog(MacToplevel):
                 return
         if root is getattr(self, "_center", None):
             return
-        try:
-            cls = root.winfo_class()
-            if cls in ("Frame", "Toplevel"):
-                cur = str(root.cget("bg") or "")
-                if cur not in ("", "#000000"):
-                    root.configure(bg=BG)
-        except tk.TclError:
-            pass
+        bg = to_tk_color(PALETTE.BG)
+        refresh = getattr(root, "refresh_palette", None)
+        if callable(refresh):
+            try:
+                refresh()
+            except tk.TclError:
+                pass
+        else:
+            try:
+                if root.winfo_class() in ("Frame", "Toplevel", "Label"):
+                    root.configure(bg=bg)
+            except tk.TclError:
+                pass
         for w in root.winfo_children():
             if w is getattr(self, "_center", None):
                 continue
-            cls = w.winfo_class()
-            try:
-                if cls in ("Frame", "Toplevel"):
-                    if w.cget("bg") not in ("", "#000000"):
-                        w.configure(bg=BG)
-                elif cls == "Label":
-                    fg = w.cget("fg")
-                    if fg and isinstance(fg, str):
-                        u = fg.upper()
-                        if u in (DIM.upper(), _LEGACY_PLACEHOLDER):
-                            w.configure(bg=BG, fg=DIM)
-                        else:
-                            w.configure(bg=BG, fg=FG)
-                    else:
-                        w.configure(bg=BG, fg=FG)
-                elif cls == "Entry":
-                    w.configure(bg=BG_FIELD, fg=FG, insertbackground=FG)
-                elif cls == "Button":
-                    if w is getattr(self, "_save_settings_btn", None):
-                        # 主按钮高亮底色,别被普通按钮的 BTN_BG 冲掉
-                        w.configure(bg=to_tk_color(PALETTE.CARD_PRESSED),
-                                    fg=FG)
-                    else:
-                        w.configure(bg=BTN_BG, fg=FG)
-                elif cls == "Radiobutton":
-                    w.configure(bg=BG, fg=FG, selectcolor=BG_FIELD,
-                                activebackground=BG, activeforeground=FG)
-            except tk.TclError:
-                pass
             self._apply_colors_to_tree(w)
 
     # ---------- 静态框架 ----------
@@ -270,65 +234,73 @@ class SettingsDialog(MacToplevel):
             self.geometry("560x620")
         except tk.TclError:
             pass
-        body = tk.Frame(self._holder, bg=BG)
+        bg = to_tk_color(PALETTE.BG)
+        fg = to_tk_color(PALETTE.TEXT)
+        dim = to_tk_color_blended(PALETTE.TEXT_DIM)
+        body = tk.Frame(self._holder, bg=bg)
         body.pack(fill="both", expand=True, padx=18, pady=14)
         self._body_inner = body
 
         # 主题 radio
-        theme_frame = tk.Frame(body, bg=BG)
-        theme_frame.grid(row=0, column=0, columnspan=3, sticky="we", pady=(0, 10))
-        tk.Label(theme_frame, text="主题", bg=BG, fg=FG,
-                 font=(FONT, 10)).grid(row=0, column=0, sticky="w",
-                                       padx=(0, 8))
+        theme_frame = tk.Frame(body, bg=bg)
+        theme_frame.grid(row=0, column=0, columnspan=3, sticky="we",
+                         pady=(0, Layout.PAD))
+        tk.Label(theme_frame, text="主题", bg=bg, fg=fg,
+                 font=(FONT, Typography.BODY_SIZE)).grid(row=0, column=0,
+                                                         sticky="w",
+                                                         padx=(0, 8))
+        self._theme_pills = []
         for i, choice in enumerate(("dark", "light", "auto")):
             label = {"dark": "深色", "light": "浅色", "auto": "跟随系统"}[choice]
-            rb = tk.Radiobutton(
-                theme_frame, text=label, variable=self._theme_var, value=choice,
-                bg=BG, fg=FG, selectcolor=BG_FIELD, activebackground=BG,
-                activeforeground=FG, font=(FONT, 10), cursor="hand2",
+            rb = RadioPill(
+                theme_frame, variable=self._theme_var, value=choice,
+                text=label, font=(FONT, Typography.BODY_SIZE),
                 command=self._on_theme_radio_click,
             )
             rb.grid(row=0, column=i + 1, padx=(0, 12), sticky="w")
+            self._theme_pills.append(rb)
         theme_frame.columnconfigure(4, weight=1)
 
         # 3 个核心设置
+        self._entries = []
         for i, (label, path, hint, lo, hi, vtype) in enumerate(ROWS):
             row_idx = i + 1
-            tk.Label(body, text=label, bg=BG, fg=FG,
-                     font=(FONT, 10)).grid(row=row_idx, column=0, sticky="w",
-                                           pady=5, padx=(0, 8))
+            tk.Label(body, text=label, bg=bg, fg=fg,
+                     font=(FONT, Typography.BODY_SIZE)).grid(
+                row=row_idx, column=0, sticky="w", pady=5, padx=(0, 8))
             v, _, _, _ = self._vars[path]
-            e = tk.Entry(body, textvariable=v, width=14,
-                         bg=BG_FIELD, fg=FG, insertbackground=FG,
-                         font=(FONT, 10), relief="flat", justify="right")
+            e = FocusEntry(body, textvariable=v, width=14,
+                           font=(FONT, Typography.BODY_SIZE), justify="right")
             e.grid(row=row_idx, column=1, sticky="e", pady=5)
-            tk.Label(body, text=hint, bg=BG, fg=DIM,
-                     font=(FONT, 8)).grid(row=row_idx, column=2, sticky="w",
-                                          pady=5, padx=(10, 0))
+            self._entries.append(e)
+            tk.Label(body, text=hint, bg=bg, fg=dim,
+                     font=(FONT, Typography.DETAIL_SIZE)).grid(
+                row=row_idx, column=2, sticky="w", pady=5, padx=(10, 0))
         body.columnconfigure(2, weight=1)
 
         # 分隔线
-        self._sep = tk.Frame(body, height=1, bg=DIM)
+        self._sep = hairline(body)
         self._sep.grid(row=4, column=0, columnspan=3, sticky="ew",
                        pady=(12, 8))
 
         # 中间区:provider 列表 / 添加·编辑表单 二选一
-        self._center = tk.Frame(body, bg=BG)
+        self._center = tk.Frame(body, bg=bg)
         self._center.grid(row=5, column=0, columnspan=3, sticky="nsew")
         body.rowconfigure(5, weight=1)
 
         # 底部按钮行
-        btn_frame = tk.Frame(body, bg=BG)
+        btn_frame = tk.Frame(body, bg=bg)
         btn_frame.grid(row=6, column=0, columnspan=3, sticky="e", pady=(8, 0))
-        tk.Button(btn_frame, text="取消", command=self._on_close_request,
-                  bg=BTN_BG, fg=FG, relief="flat", font=(FONT, 10),
-                  width=10).pack(side="right", padx=(8, 0))
-        self._save_settings_btn = tk.Button(btn_frame, text="保存设置",
-                                            command=self._save,
-                                            bg=to_tk_color(PALETTE.CARD_PRESSED),
-                                            fg=FG, relief="flat",
-                                            font=(FONT, 10), width=10)
+        # 主操作在最右:pack 按创建顺序分配,先建 取消(side=right)会把它
+        # 排在右边,再建 保存设置 落在它左边 —— 与"确认在右"的惯例相反。
+        self._save_settings_btn = FlatButton(
+            btn_frame, text="保存设置", variant="solid", width=10,
+            on_click=self._save, font=(FONT, Typography.BODY_SIZE))
         self._save_settings_btn.pack(side="right")
+        FlatButton(btn_frame, text="取消", variant="ghost", width=10,
+                   on_click=self._on_close_request,
+                   font=(FONT, Typography.BODY_SIZE)).pack(side="right",
+                                                           padx=(0, 8))
 
     # ---------- 中间区:列表模式 ----------
 
@@ -342,71 +314,108 @@ class SettingsDialog(MacToplevel):
         except (tk.TclError, AttributeError):
             pass
 
+        bg = to_tk_color(PALETTE.BG)
+        fg = to_tk_color(PALETTE.TEXT)
+        dim = to_tk_color_blended(PALETTE.TEXT_DIM)
         center = self._center
 
-        head = tk.Frame(center, bg=BG)
-        head.pack(fill="x", pady=(0, 4))
-        tk.Label(head, text="API 管理", bg=BG, fg=FG,
-                 font=(FONT, 10, "bold")).pack(side="left")
+        head = tk.Frame(center, bg=bg)
+        head.pack(fill="x", pady=(0, Layout.ROW_GAP))
+        tk.Label(head, text="API 管理", bg=bg, fg=fg,
+                 font=(FONT, Typography.BODY_SIZE,
+                       Typography.TITLE_WEIGHT)).pack(side="left")
         providers = [p for p in (self._cfg.get("providers") or [])
                      if isinstance(p, dict)]
-        tk.Label(head, text=f"共 {len(providers)} 个", bg=BG, fg=DIM,
-                 font=(FONT, 9)).pack(side="left", padx=(8, 0))
+        tk.Label(head, text=f"共 {len(providers)} 个", bg=bg, fg=dim,
+                 font=(FONT, Typography.DETAIL_SIZE)).pack(side="left",
+                                                            padx=(8, 0))
 
         # 底部添加链接(先 pack,保证列表 expand 时不挤掉它)
-        add_link = tk.Label(center, text="→ 添加 API Key", bg=BG, fg=FG,
-                            font=(FONT, 10, "underline"), cursor="hand2")
+        add_link = tk.Label(center, text="→ 添加 API Key", bg=bg, fg=fg,
+                            font=(FONT, Typography.BODY_SIZE, "underline"),
+                            cursor="hand2")
         add_link.pack(side="bottom", anchor="e", pady=(6, 0))
         add_link.bind("<Button-1>", lambda e: self._swap_center_form(None))
+        # 可点的文字却零 hover 反馈:光标是手型,划过去没有变化,
+        # 用户不知道这是个链接而不是一行说明。
+        bind_hover_bg([add_link], lambda: to_tk_color(PALETTE.CARD_HOVER),
+                      lambda: bg)
 
-        list_wrap = tk.Frame(center, bg=BG)
+        list_wrap = tk.Frame(center, bg=bg)
         list_wrap.pack(fill="both", expand=True)
-        canvas = tk.Canvas(list_wrap, bg=BG, highlightthickness=0, bd=0)
+        canvas = tk.Canvas(list_wrap, bg=bg, highlightthickness=0, bd=0)
         scroll = make_dark_scrollbar(list_wrap, orient="vertical",
                                      command=canvas.yview)
-        inner = tk.Frame(canvas, bg=BG)
+        inner = tk.Frame(canvas, bg=bg)
         inner.bind("<Configure>",
                    lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=inner, anchor="nw")
+        # 画布里的窗口项默认取 inner 的自然宽度;不撑满画布的话,空态文案
+        # 会缩在左侧一小块里"居中"。
+        self._list_win = canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.bind(
+            "<Configure>",
+            lambda e: canvas.itemconfigure(self._list_win, width=e.width))
         canvas.configure(yscrollcommand=scroll.set)
         canvas.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
-        canvas.bind("<Enter>", self._wheel_enter)
-        canvas.bind("<Leave>", self._wheel_leave)
+        self._unbind_wheel = bind_wheel_tree(inner, self._on_wheel)
         self._list_canvas = canvas
 
         if not providers:
-            tk.Label(inner, text="暂无 provider,点击下方「添加 API Key」开始",
-                     bg=BG, fg=DIM, font=(FONT, 9)).pack(
-                anchor="w", padx=4, pady=16)
+            box = tk.Frame(inner, bg=bg)
+            box.pack(fill="x", pady=Layout.PAD * 2)
+            tk.Label(box, text="还没有添加任何 API Key", bg=bg, fg=fg,
+                     font=(FONT, Typography.BODY_SIZE)).pack(
+                pady=(0, 4), anchor="center")
+            tk.Label(box, text="添加后即可在这里管理名称、地址与密钥",
+                     bg=bg, fg=dim,
+                     font=(FONT, Typography.DETAIL_SIZE)).pack(anchor="center")
         for p in providers:
             self._build_provider_row(inner, p)
+        # provider 行是刚建出来的,重新打一遍滚轮 tag
+        tag_subtree(inner, wheel_tag(inner))
 
     def _build_provider_row(self, parent, p):
+
+        """provider 行:静止不铺色块,hover 才浮出一层填充。
+
+        原来每行都铺 BG_FIELD(进度轨道色),4 条 provider 排下来是一片
+        灰砖,而"这是哪一行"的信息靠底色深浅给,并不比 hover 更清楚。
+        """
         pid = p.get("id")
         name = p.get("name") or "未命名"
         kind = p.get("kind") or ""
         url = p.get("base_url") or "(未填 base_url)"
 
-        row = tk.Frame(parent, bg=BG_FIELD)
-        row.pack(fill="x", pady=2)
-        top = tk.Frame(row, bg=BG_FIELD)
-        top.pack(fill="x", padx=8, pady=(4, 0))
-        tk.Label(top, text=name, bg=BG_FIELD, fg=FG,
-                 font=(FONT, 9, "bold")).pack(side="left")
+        bg = to_tk_color(PALETTE.BG)
+        fg = to_tk_color(PALETTE.TEXT)
+        dim = to_tk_color_blended(PALETTE.TEXT_DIM)
+
+        row = tk.Frame(parent, bg=bg)
+        row.pack(fill="x")
+        top = tk.Frame(row, bg=bg)
+        top.pack(fill="x", padx=8, pady=(Layout.ROW_PAD_Y, 0))
+        tk.Label(top, text=name, bg=bg, fg=fg,
+                 font=(FONT, Typography.BODY_SIZE,
+                       Typography.TITLE_WEIGHT)).pack(side="left")
         tk.Label(top, text=KIND_LABELS.get(kind, kind) or "未知类型",
-                 bg=BG_FIELD, fg=DIM, font=(FONT, 8)).pack(
-            side="left", padx=(8, 0))
-        tk.Button(top, text="编辑", font=(FONT, 8), bg=BTN_BG, fg=FG,
-                  relief="flat", bd=0, cursor="hand2", width=4,
-                  command=lambda: self._swap_center_form(pid)).pack(side="right")
-        tk.Button(top, text="删除", font=(FONT, 8), bg=BTN_BG, fg=FG,
-                  relief="flat", bd=0, cursor="hand2", width=4,
-                  command=lambda: self._confirm_delete(pid)).pack(
+                 bg=bg, fg=dim,
+                 font=(FONT, Typography.DETAIL_SIZE)).pack(side="left",
+                                                           padx=(8, 0))
+        FlatButton(top, text="编辑", variant="ghost", width=4, padx=6, pady=2,
+                   font=(FONT, Typography.DETAIL_SIZE),
+                   on_click=lambda: self._swap_center_form(pid)).pack(side="right")
+        FlatButton(top, text="删除", variant="ghost", width=4, padx=6, pady=2,
+                   font=(FONT, Typography.DETAIL_SIZE),
+                   on_click=lambda: self._confirm_delete(pid)).pack(
             side="right", padx=(0, 6))
-        tk.Label(row, text=url, bg=BG_FIELD, fg=DIM,
-                 font=(FONT, 8), anchor="w").pack(
-            fill="x", padx=8, pady=(0, 4))
+        url_lbl = tk.Label(row, text=url, bg=bg, fg=dim,
+                           font=(FONT, Typography.DETAIL_SIZE), anchor="w")
+        url_lbl.pack(fill="x", padx=8, pady=(0, Layout.ROW_PAD_Y))
+
+        chain = [row, top, url_lbl]
+        bind_hover_bg(chain, lambda: to_tk_color(PALETTE.CARD_HOVER), lambda: bg)
+        hairline(row).pack(side="bottom", fill="x")
 
     # ---------- 中间区:表单模式 ----------
 
@@ -420,10 +429,14 @@ class SettingsDialog(MacToplevel):
             pass
 
         center = self._center
-        back = tk.Label(center, text="← 返回列表", bg=BG, fg=FG,
-                        font=(FONT, 10, "underline"), cursor="hand2")
+        back = tk.Label(center, text="← 返回列表", bg=to_tk_color(PALETTE.BG),
+                        fg=to_tk_color(PALETTE.TEXT),
+                        font=(FONT, Typography.BODY_SIZE, "underline"),
+                        cursor="hand2")
         back.pack(anchor="w", pady=(0, 6))
         back.bind("<Button-1>", lambda e: self._swap_center_list())
+        bind_hover_bg([back], lambda: to_tk_color(PALETTE.CARD_HOVER),
+                      lambda: to_tk_color(PALETTE.BG))
 
         from ui.add_key import AddKeyForm
         provider = self._find_provider(pid) if pid else None
@@ -512,31 +525,24 @@ class SettingsDialog(MacToplevel):
             pass
 
     def _wheel_enter(self, _event=None):
-        if self._wheel_bound:
-            return
-        try:
-            # 记 funcid:unbind_all(sequence) 会清掉 "all" tag 上该序列的
-            # 全部绑定,包括面板行区的滚轮。设置窗口的列表一进一出,
-            # 面板的滚轮就没了。
-            self._wheel_funcid = self._list_canvas.bind_all(
-                "<MouseWheel>", self._on_wheel, add="+")
-            self._wheel_bound = True
-        except (tk.TclError, AttributeError):
-            pass
+        """已废弃:滚轮改由 bind_wheel_tree 常驻挂在 inner 子树上。
+
+        旧的 <Enter>/<Leave> + bind_all 组合会在移出列表时用
+        unbind_all(sequence, funcid) 摘绑定,而 tkinter 的 unbind_all 只
+        接受一个参数 → TypeError;而且没摘干净的全局绑定会把主面板的
+        滚轮抢走(这正是原注释里担心的那个 bug)。
+        """
+        return None
 
     def _wheel_leave(self, _event=None):
-        if not self._wheel_bound:
-            return
-        self._wheel_bound = False
-        fid = getattr(self, "_wheel_funcid", None)
-        self._wheel_funcid = None
-        if fid is None:
+        unbind = getattr(self, "_unbind_wheel", None)
+        if unbind is None:
             return
         try:
-            self.unbind_all("<MouseWheel>", fid)
+            unbind()
         except tk.TclError:
             pass
-        self._wheel_bound = False
+        self._unbind_wheel = None
 
     def _destroy_center(self):
         for w in self._center.winfo_children():

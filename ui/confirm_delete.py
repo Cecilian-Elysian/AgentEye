@@ -5,32 +5,14 @@
 """
 
 import tkinter as tk
-from tkinter import ttk
 
-from ui.theme import PALETTE, to_tk_color, to_tk_color_blended
+from ui.theme import PALETTE, Layout, Typography, to_tk_color
+from ui.fonts import pick_ui_family
+from ui.paint import FlatButton, FocusEntry
 from ui.mac_toplevel import MacToplevel
 
 
-FONT = "Microsoft YaHei UI"
-BG = to_tk_color(PALETTE.BG)
-BG_FIELD = to_tk_color(PALETTE.BAR_BG)
-FG = to_tk_color(PALETTE.TEXT)
-DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
-OK = to_tk_color(PALETTE.OK)
-CRITICAL = to_tk_color(PALETTE.CRITICAL)
-BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
-
-
-def _refresh_confirm_palette():
-    """主题切换时同步本模块的颜色常量。"""
-    global BG, BG_FIELD, FG, DIM, OK, CRITICAL, BTN_BG
-    BG = to_tk_color(PALETTE.BG)
-    BG_FIELD = to_tk_color(PALETTE.BAR_BG)
-    FG = to_tk_color(PALETTE.TEXT)
-    DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
-    OK = to_tk_color(PALETTE.OK)
-    CRITICAL = to_tk_color(PALETTE.CRITICAL)
-    BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
+FONT = pick_ui_family()
 
 
 class ConfirmDeleteDialog(MacToplevel):
@@ -59,38 +41,39 @@ class ConfirmDeleteDialog(MacToplevel):
         self._expected = str(name)
         self._on_confirm = on_confirm
 
-        body = tk.Frame(self.body, bg=BG)
+        bg = to_tk_color(PALETTE.BG)
+        body = tk.Frame(self.body, bg=bg)
         body.pack(fill="both", expand=True, padx=18, pady=14)
 
         tk.Label(
             body, text=message or f"删除 {self._expected} 不可恢复。",
-            bg=BG, fg=FG, font=(FONT, 10), wraplength=360, justify="left",
+            bg=bg, fg=to_tk_color(PALETTE.TEXT),
+            font=(FONT, Typography.BODY_SIZE), wraplength=360, justify="left",
         ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
         tk.Label(
             body, text=f"请输入名字 {self._expected} 以确认:",
-            bg=BG, fg=DIM, font=(FONT, 9),
+            bg=bg, fg=to_tk_color(PALETTE.OFF),
+            font=(FONT, Typography.DETAIL_SIZE),
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
         self._var = tk.StringVar()
-        entry = tk.Entry(
+        self.entry = FocusEntry(
             body, textvariable=self._var, width=32,
-            bg=BG_FIELD, fg=FG, insertbackground=FG,
-            font=(FONT, 10), relief="flat",
+            font=(FONT, Typography.BODY_SIZE),
         )
-        entry.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        self.entry.grid(row=2, column=0, columnspan=2, sticky="ew",
+                        pady=(0, 12))
         self._var.trace_add("write", lambda *a: self._refresh_state())
 
-        btn_frame = tk.Frame(body, bg=BG)
+        btn_frame = tk.Frame(body, bg=bg)
         btn_frame.grid(row=3, column=0, columnspan=2, sticky="e")
-        tk.Button(
-            btn_frame, text="取消", command=self._cancel,
-            bg=BTN_BG, fg=FG, relief="flat", font=(FONT, 10), width=10,
-        ).pack(side="right", padx=(8, 0))
-        self.confirm_btn = tk.Button(
-            btn_frame, text="确认删除", command=self._do_confirm,
-            bg=CRITICAL, fg=to_tk_color(PALETTE.BG), relief="flat", font=(FONT, 10),
-            width=10, state="disabled",
+        FlatButton(btn_frame, variant="ghost", text="取消",
+                   on_click=self._cancel, width=10).pack(side="right",
+                                                          padx=(8, 0))
+        self.confirm_btn = FlatButton(
+            btn_frame, variant="danger", text="确认删除",
+            on_click=self._do_confirm, width=10, state="disabled",
         )
         self.confirm_btn.pack(side="right")
 
@@ -104,7 +87,7 @@ class ConfirmDeleteDialog(MacToplevel):
         # "grab failed: window not viewable"。挂到 <Map>,映射后自动拿到
         self.bind("<Map>", self._grab_when_viewable, add="+")
         self.focus_set()
-        entry.focus_set()
+        self.entry.focus_set()
 
     def _grab_when_viewable(self, e=None):
         try:
@@ -113,43 +96,35 @@ class ConfirmDeleteDialog(MacToplevel):
             pass
 
     def refresh_palette(self):
+        """主题切换:逐个控件问它自己"新配色是什么"。
+
+        旧实现是 walk 子树 + 读当前 fg/bg 猜语义(靠 `#8B8B9E` / `#FF5D5D`
+        这类历史色值当哨兵),新控件一旦换了配色就猜错,而且哨兵会随主题
+        一起失效。让每个控件自己 refresh_palette,加控件时不用改这里。
+        """
+        bg = to_tk_color(PALETTE.BG)
         try:
-            _refresh_confirm_palette()
-        except Exception:
-            pass
-        try:
-            try:
-                self.body.configure(bg=BG)
-            except tk.TclError:
-                pass
+            self.body.configure(bg=bg)
             for w in self.body.winfo_children():
-                self._walk_recolor(w)
+                self._walk_refresh(w, bg)
         except tk.TclError:
             pass
 
-    def _walk_recolor(self, w):
-        try:
-            cls = w.winfo_class()
-            if cls == "Frame":
-                w.configure(bg=BG)
-            elif cls == "Label":
-                fg = str(w.cget("fg") or "").upper()
-                if fg in (DIM.upper(), "#8B8B9E"):
-                    w.configure(bg=BG, fg=DIM)
-                else:
-                    w.configure(bg=BG, fg=FG)
-            elif cls == "Entry":
-                w.configure(bg=BG_FIELD, fg=FG, insertbackground=FG)
-            elif cls == "Button":
-                bg_now = str(w.cget("bg") or "").upper()
-                if bg_now in (CRITICAL.upper(), "#FF5D5D"):
-                    w.configure(bg=CRITICAL, fg=to_tk_color(PALETTE.BG))
-                else:
-                    w.configure(bg=BTN_BG, fg=FG)
-        except tk.TclError:
-            pass
+    def _walk_refresh(self, w, bg):
+        refresh = getattr(w, "refresh_palette", None)
+        if callable(refresh):
+            try:
+                refresh()
+            except tk.TclError:
+                pass
+        else:
+            try:
+                if w.winfo_class() in ("Frame", "Label"):
+                    w.configure(bg=bg)
+            except tk.TclError:
+                pass
         for c in w.winfo_children():
-            self._walk_recolor(c)
+            self._walk_refresh(c, bg)
 
     def _refresh_state(self):
         if self._var.get() == self._expected:

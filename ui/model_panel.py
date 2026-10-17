@@ -1,4 +1,4 @@
-"""Model 详情弹窗:展示 provider 的模型列表 + 搜索 + 分组 + 试调。"""
+﻿"""Model 详情弹窗:展示 provider 的模型列表 + 搜索 + 分组 + 试调。"""
 
 import queue
 import threading
@@ -6,13 +6,16 @@ import time
 import tkinter as tk
 
 from ui.scrollbar_style import make_dark_scrollbar
-from ui.theme import PALETTE, to_tk_color, to_tk_color_blended
+from ui.theme import PALETTE, Layout, Typography, to_tk_color, to_tk_color_blended
+from ui.fonts import pick_ui_family
+from ui.paint import (FlatButton, FocusEntry, hairline, bind_hover_bg,
+                      bind_press_bg, bind_wheel_tree, tag_subtree, wheel_tag)
+
 from ui.mac_toplevel import MacToplevel
 
 
 class ModelPanel(MacToplevel):
-    # 旧版本写死的搜索框底色,主题重刷时用来归一;新代码走 PALETTE.BAR_BG
-    _LEGACY_FIELD_BG = "#15151D"
+    FONT = pick_ui_family()
 
     GROUP_RULES = [
         ("Claude", ("claude",)),
@@ -48,47 +51,50 @@ class ModelPanel(MacToplevel):
         self.probe_btns = {}
         self._probe_results = queue.Queue()
         self._pump_scheduled = False
+        self._unbind_wheel = None
 
-        BG = to_tk_color(PALETTE.CARD)
+        BG = to_tk_color(PALETTE.BG)
         FG = to_tk_color(PALETTE.TEXT)
         DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
-        BG_FIELD = to_tk_color(PALETTE.BAR_BG)
-        BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
         OK = to_tk_color(PALETTE.OK)
-        FONT = ("Microsoft YaHei UI", 10)
 
         top = tk.Frame(self.body, bg=BG)
-        top.pack(fill="x", padx=12, pady=(12, 6))
+        top.pack(fill="x", padx=Layout.PAD_X,
+                 pady=(Layout.PAD, Layout.ROW_GAP))
         self.count_var = tk.StringVar(value=f"{len(self.models)} 个模型")
         tk.Label(top, textvariable=self.count_var,
-                 bg=BG, fg=DIM, font=FONT).pack(side="left")
+                 bg=BG, fg=DIM,
+                 font=(self.FONT, Typography.DETAIL_SIZE)).pack(side="left")
 
         search_frame = tk.Frame(self.body, bg=BG)
-        search_frame.pack(fill="x", padx=12)
+        search_frame.pack(fill="x", padx=Layout.PAD_X)
         self.search_var = tk.StringVar()
         self.search_var.trace_add("write", lambda *a: self._apply_filter())
-        tk.Entry(search_frame, textvariable=self.search_var,
-                 bg=BG_FIELD, fg=FG, insertbackground=FG,
-                 font=FONT, relief="flat").pack(fill="x")
+        self.search_entry = FocusEntry(
+            search_frame, textvariable=self.search_var,
+            font=(self.FONT, Typography.BODY_SIZE))
+        self.search_entry.pack(fill="x")
 
         calc_frame = tk.Frame(self.body, bg=BG)
-        calc_frame.pack(fill="x", padx=12, pady=(4, 0))
+        calc_frame.pack(fill="x", padx=Layout.PAD_X, pady=(Layout.ROW_GAP, 0))
         tk.Label(calc_frame, text="估算调用", bg=BG, fg=DIM,
-                 font=(FONT, 9)).pack(side="left")
+                 font=(self.FONT, Typography.DETAIL_SIZE)).pack(side="left")
         self.calc_n_var = tk.StringVar(value="100")
         self.calc_n_var.trace_add("write", lambda *a: self._on_calc_change())
-        tk.Entry(calc_frame, textvariable=self.calc_n_var, width=6,
-                 bg=BG_FIELD, fg=FG, insertbackground=FG,
-                 font=(FONT, 9), relief="flat").pack(side="left", padx=(4, 2))
+        FocusEntry(calc_frame, textvariable=self.calc_n_var, width=6,
+                   font=(self.FONT, Typography.DETAIL_SIZE)).pack(
+            side="left", padx=(4, 2))
         tk.Label(calc_frame, text="次 (按选定模型)", bg=BG, fg=DIM,
-                 font=(FONT, 9)).pack(side="left")
+                 font=(self.FONT, Typography.DETAIL_SIZE)).pack(side="left")
         self.calc_cost_var = tk.StringVar(value="选择模型后查看")
         tk.Label(calc_frame, textvariable=self.calc_cost_var,
-                 bg=BG, fg=OK, font=(FONT, 9, "bold")).pack(
-            side="right")
+                 bg=BG, fg=OK,
+                 font=(self.FONT, Typography.BODY_SIZE,
+                       Typography.TITLE_WEIGHT)).pack(side="right")
 
         list_frame = tk.Frame(self.body, bg=BG)
-        list_frame.pack(fill="both", expand=True, padx=12, pady=8)
+        list_frame.pack(fill="both", expand=True, padx=Layout.PAD_X,
+                        pady=Layout.PAD_Y)
 
         self.canvas = tk.Canvas(list_frame, bg=BG, highlightthickness=0)
         self.scroll = make_dark_scrollbar(list_frame, orient="vertical",
@@ -103,14 +109,14 @@ class ModelPanel(MacToplevel):
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scroll.pack(side="right", fill="y")
         self.canvas.bind("<Configure>", self._on_canvas_configure)
-        self.canvas.bind("<Enter>", self._wheel_enter)
-        self.canvas.bind("<Leave>", self._wheel_leave)
+        self._unbind_wheel = bind_wheel_tree(self.inner, self._on_wheel)
 
         btn_frame = tk.Frame(self.body, bg=BG)
-        btn_frame.pack(side="bottom", fill="x", padx=12, pady=8)
-        tk.Button(btn_frame, text="关闭", command=self._on_close,
-                  bg=BTN_BG, fg=FG, relief="flat", font=FONT,
-                  width=10).pack(side="right")
+        btn_frame.pack(side="bottom", fill="x", padx=Layout.PAD_X,
+                       pady=Layout.PAD_Y)
+        FlatButton(btn_frame, text="关闭", variant="ghost", width=10,
+                   on_click=self._on_close,
+                   font=(self.FONT, Typography.BODY_SIZE)).pack(side="right")
 
         self.bind("<Escape>", lambda e: self._on_close())
         # grab 不能在构造里立即调:窗口尚未 map 时抛
@@ -122,52 +128,38 @@ class ModelPanel(MacToplevel):
         self._render()
 
     def refresh_palette(self):
+        """主题切换:逐控件自刷新。
+
+        旧实现 walk 子树读当前色值猜语义(靠 `_LEGACY_FIELD_BG` 当哨兵),
+        主题一换哨兵就失效。现在每个控件自己报新配色,加控件时这里不用改。
+        """
+        bg = to_tk_color(PALETTE.BG)
         try:
-            BG = to_tk_color(PALETTE.CARD)
-            FG = to_tk_color(PALETTE.TEXT)
-            DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
-            BG_FIELD = to_tk_color(PALETTE.BAR_BG)
-            BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
-            OK = to_tk_color(PALETTE.OK)
-            try:
-                self.body.configure(bg=BG)
-            except tk.TclError:
-                pass
+            self.body.configure(bg=bg)
             for w in self.body.winfo_children():
-                self._walk_recolor(w, BG, FG, DIM, BG_FIELD, BTN_BG, OK)
-            try:
-                self.canvas.configure(bg=BG)
-                self.inner.configure(bg=BG)
-            except tk.TclError:
-                pass
+                self._walk_refresh(w, bg)
+            self.canvas.configure(bg=bg)
+            self.inner.configure(bg=bg)
+            # 列表行由 _render 重建,这里主动重排一次让它用上新配色
+            self._render()
         except tk.TclError:
             pass
 
-    def _walk_recolor(self, w, BG, FG, DIM, BG_FIELD, BTN_BG, OK):
-        try:
-            cls = w.winfo_class()
-            if cls == "Frame":
-                cur_bg = str(w.cget("bg") or "")
-                if cur_bg.upper() in (BG_FIELD.upper(), _LEGACY_FIELD_BG):
-                    w.configure(bg=BG_FIELD)
-                else:
-                    w.configure(bg=BG)
-            elif cls == "Label":
-                fg_now = str(w.cget("fg") or "").upper()
-                if fg_now == OK.upper():
-                    w.configure(fg=OK)
-                elif fg_now == DIM.upper():
-                    w.configure(fg=DIM)
-                else:
-                    w.configure(fg=FG)
-            elif cls == "Entry":
-                w.configure(bg=BG_FIELD, fg=FG, insertbackground=FG)
-            elif cls == "Button":
-                w.configure(bg=BTN_BG, fg=FG)
-        except tk.TclError:
-            pass
+    def _walk_refresh(self, w, bg):
+        refresh = getattr(w, "refresh_palette", None)
+        if callable(refresh):
+            try:
+                refresh()
+            except tk.TclError:
+                pass
+        else:
+            try:
+                if w.winfo_class() in ("Frame", "Toplevel", "Label"):
+                    w.configure(bg=bg)
+            except tk.TclError:
+                pass
         for c in w.winfo_children():
-            self._walk_recolor(c, BG, FG, DIM, BG_FIELD, BTN_BG, OK)
+            self._walk_refresh(c, bg)
 
     def _apply_filter(self):
         q = self.search_var.get().lower().strip()
@@ -196,16 +188,18 @@ class ModelPanel(MacToplevel):
         for w in self.inner.winfo_children():
             w.destroy()
 
-        BG = to_tk_color(PALETTE.CARD)
+        BG = to_tk_color(PALETTE.BG)
         DIM = to_tk_color_blended(PALETTE.TEXT_DIM)
         FG = to_tk_color(PALETTE.TEXT)
-        BG_FIELD = to_tk_color(PALETTE.BAR_BG)
-        BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
-        FONT = ("Microsoft YaHei UI", 9)
 
         if not self.filtered:
-            tk.Label(self.inner, text="(无匹配)", bg=BG,
-                     fg=DIM, font=("Microsoft YaHei UI", 10)).pack(pady=20)
+            box = tk.Frame(self.inner, bg=BG)
+            box.pack(fill="x", pady=Layout.PAD * 2)
+            tk.Label(box, text="没有匹配的模型", bg=BG, fg=FG,
+                     font=(self.FONT, Typography.BODY_SIZE)).pack(pady=(0, 4))
+            tk.Label(box, text="换个关键词,或清空搜索框看全部",
+                     bg=BG, fg=DIM,
+                     font=(self.FONT, Typography.DETAIL_SIZE)).pack()
             try:
                 self.canvas.update_idletasks()
                 self.canvas.yview_moveto(0.0)
@@ -224,32 +218,53 @@ class ModelPanel(MacToplevel):
             if group_name not in grouped:
                 continue
             tk.Label(self.inner, text=group_name, bg=BG, fg=DIM,
-                     font=(FONT[0], 9, "bold")).pack(anchor="w", pady=(8, 2))
+                     font=(self.FONT, Typography.DETAIL_SIZE,
+                           Typography.TITLE_WEIGHT)).pack(
+                anchor="w", pady=(Layout.PAD_Y, 2))
             for m in grouped[group_name]:
-                row = tk.Frame(self.inner, bg=BG_FIELD, cursor="hand2")
-                row.pack(fill="x", pady=1)
+                # 行不铺色块:模型动辄几十条,每条一块灰砖就是一片噪点。
+                # 分组靠组标题的字重,行与行之间靠 hairline。
+                row = tk.Frame(self.inner, bg=BG, cursor="hand2")
+                row.pack(fill="x")
                 row._model_id = m
-                tk.Label(row, text=m, bg=BG_FIELD, fg=FG,
-                         font=FONT, anchor="w").pack(side="left", padx=8, pady=4)
+                name_lbl = tk.Label(row, text=m, bg=BG, fg=FG,
+                                    font=(self.FONT, Typography.DETAIL_SIZE),
+                                    anchor="w")
+                name_lbl.pack(side="left", padx=8, pady=3)
+                chain = [row, name_lbl]
                 if self.on_probe:
                     probe_var = tk.StringVar(value="")
                     self.probe_result_vars[m] = probe_var
-                    tk.Label(row, textvariable=probe_var,
-                             bg=BG_FIELD, fg=DIM, font=(FONT[0], 8),
-                             width=12, anchor="e").pack(
-                        side="right", padx=4)
-                    probe_btn = tk.Button(row, text="试调", font=(FONT[0], 8),
-                                          bg=BTN_BG, fg=FG, relief="flat",
-                                          command=lambda model=m: self._probe(model))
+                    result_lbl = tk.Label(row, textvariable=probe_var, bg=BG,
+                                          fg=DIM, width=12, anchor="e",
+                                          font=(self.FONT,
+                                                Typography.DETAIL_SIZE))
+                    result_lbl.pack(side="right", padx=4)
+                    chain.append(result_lbl)
+                    probe_btn = FlatButton(
+                        row, text="试调", variant="ghost",
+                        font=(self.FONT, Typography.DETAIL_SIZE),
+                        padx=6, pady=2,
+                        on_click=lambda model=m: self._probe(model))
                     if m in self._probing:
                         probe_btn.config(state="disabled")
                     probe_btn.pack(side="right", padx=4, pady=2)
                     self.probe_btns[m] = probe_btn
-                select_btn = tk.Label(row, text="估算", font=(FONT[0], 8),
-                                      bg=BTN_BG, fg=FG, cursor="hand2")
+                select_btn = FlatButton(
+                    row, text="估算", variant="ghost",
+                    font=(self.FONT, Typography.DETAIL_SIZE),
+                    padx=6, pady=2)
                 select_btn.pack(side="right", padx=(0, 4), pady=2)
                 self._attach_tooltip(select_btn, "用于上方估算调用成本")
-                select_btn.bind("<Button-1>", lambda e, model=m: self._select_model(model))
+                select_btn.bind("<Button-1>",
+                                lambda e, model=m: self._select_model(model),
+                                add="+")
+                # 之前整行 cursor="hand2" 却没有任何 hover 反馈,
+                # 划过一整列模型看不出哪一行是可操作的。
+                bind_hover_bg(chain,
+                              lambda: to_tk_color(PALETTE.CARD_HOVER),
+                              lambda: BG)
+                hairline(row).pack(side="bottom", fill="x")
 
                 for child in row.winfo_children():
                     child.bind("<Button-1>", lambda e, mid=m: self._drag_press(e, mid), add="+")
@@ -264,6 +279,8 @@ class ModelPanel(MacToplevel):
             self.canvas.yview_moveto(scroll_pos)
         except tk.TclError:
             pass
+        # 行是刚重建的,重新打一遍滚轮 tag,否则悬停在新行上滚不动
+        tag_subtree(self.inner, wheel_tag(self.inner))
 
     def _drag_press(self, event, mid):
         w = event.widget
@@ -326,8 +343,9 @@ class ModelPanel(MacToplevel):
         rows = [w for w in self.inner.pack_slaves()
                 if isinstance(w, tk.Frame) and hasattr(w, "_model_id")
                 and w._model_id != d["mid"]]
-        indicator = tk.Frame(self.inner, height=2,
-                             bg=to_tk_color(PALETTE.RED))
+        indicator = tk.Frame(self.inner, height=Layout.DRAG_MARKER,
+                             bg=to_tk_color(PALETTE.BLUE), bd=0,
+                             highlightthickness=0)
         d["indicator"] = indicator
         idx = d["target"]
         if idx < len(rows):
@@ -484,26 +502,23 @@ class ModelPanel(MacToplevel):
             pass
 
     def _wheel_enter(self, event):
-        try:
-            # 记 funcid,离开/关闭时只摘自己那一个;unbind_all(sequence)
-            # 会把 "all" tag 上该序列的所有绑定清掉,连面板的滚轮一起没
-            self._wheel_funcid = self.canvas.bind_all(
-                "<MouseWheel>", self._on_wheel, add="+")
-        except tk.TclError:
-            pass
+        """已废弃:滚轮改由 bind_wheel_tree 常驻挂在 inner 子树上。
 
-    def _wheel_leave(self, event):
-        self._unbind_wheel()
+        旧的 <Enter>/<Leave> + bind_all 组合在移出列表时会走
+        unbind_all(sequence, funcid),而 tkinter 的 unbind_all 只接受一个
+        参数 → TypeError;而且没摘干净的全局绑定会连主面板的滚轮一起抢走。
+        """
+        return None
 
-    def _unbind_wheel(self):
-        fid = getattr(self, "_wheel_funcid", None)
-        self._wheel_funcid = None
-        if fid is None:
+    def _wheel_leave(self, event=None):
+        unbind = getattr(self, "_unbind_wheel", None)
+        if unbind is None:
             return
         try:
-            self.canvas.unbind_all("<MouseWheel>", fid)
+            unbind()
         except tk.TclError:
             pass
+        self._unbind_wheel = None
 
     def _grab_when_viewable(self, e=None):
         try:
@@ -512,7 +527,7 @@ class ModelPanel(MacToplevel):
             pass
 
     def _on_close(self):
-        self._unbind_wheel()
+        self._wheel_leave()
         try:
             self.grab_release()
         except tk.TclError:
@@ -520,49 +535,10 @@ class ModelPanel(MacToplevel):
         self.destroy()
 
     def _attach_tooltip(self, widget, text, delay_ms=600):
-        tip = {"win": None, "after_id": None}
-
-        def _show():
-            if tip["win"] is not None:
-                return
-            try:
-                x = widget.winfo_rootx() + 20
-                y = widget.winfo_rooty() + widget.winfo_height() + 4
-            except tk.TclError:
-                return
-            win = tk.Toplevel(self)
-            win.wm_overrideredirect(True)
-            win.wm_geometry(f"+{x}+{y}")
-            tk.Label(win, text=text,
-                     bg=to_tk_color(PALETTE.CARD_HOVER),
-                     fg=to_tk_color(PALETTE.TEXT),
-                     font=("Microsoft YaHei UI", 9), padx=8, pady=3,
-                     relief="flat").pack()
-            tip["win"] = win
-
-        def _hide():
-            if tip["after_id"]:
-                try:
-                    self.after_cancel(tip["after_id"])
-                except tk.TclError:
-                    pass
-                tip["after_id"] = None
-            if tip["win"] is not None:
-                try:
-                    tip["win"].destroy()
-                except tk.TclError:
-                    pass
-                tip["win"] = None
-
-        def _on_enter(e):
-            tip["after_id"] = self.after(delay_ms, _show)
-
-        def _on_leave(e):
-            _hide()
-
-        widget.bind("<Enter>", _on_enter, add="+")
-        widget.bind("<Leave>", _on_leave, add="+")
-        widget.bind("<Button-1>", _hide, add="+")
+        """委托共享实现。原来这里是 model_panel 的私有副本,少了
+        <Destroy> 绑定,列表重渲染后弹窗留在已销毁的父窗口上。"""
+        from ui.tooltip import attach
+        return attach(widget, lambda: text, delay_ms=delay_ms, owner=self)
 
 
 # 常见模型公开价(USD per 1M tokens),粗略。生产环境应从 provider /pricing 端点拉。
