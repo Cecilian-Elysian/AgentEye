@@ -202,7 +202,7 @@ def _to_legacy_entry(p, key):
 def _num(value, default):
     """从配置里取数字。JSON 里显式的 null、非数字字符串都要能兜住。
 
-    阈��解析失败若抛到上层,fetch_all 整个不返回,面板会冻在上一次数据上。
+    阈值解析失败若抛到上层,fetch_all 整个不返回,面板会冻在上一次数据上。
     """
     if value is None:
         return default

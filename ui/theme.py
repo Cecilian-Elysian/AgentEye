@@ -1,4 +1,4 @@
-"""macOS Sonoma 风格调色板 + Dark / Light / Auto 主题切换。
+"""极简工具风调色板 + Dark / Light / Auto 主题切换。
 
 设计:
 - DarkPalette / LightPalette 两个类,字段一一对应
@@ -10,7 +10,9 @@
 约定:
 - HEX 默认 6 位;需要 alpha 时用 8 位 #RRGGBBAA 字符串
 - 等级色 (ok/warn/critical/error/unknown) 直接挂在 LEVEL_COLOR
-- 圆角 / 间距 / 字号统一在 LAYOUT / TYPOGRAPHY,便于一处改全局变
+- 灰阶是一条斜坡:BG < CARD < CARD_HOVER < CARD_PRESSED < BAR_BG,
+  每一档都要能肉眼分开,不能有两档同色
+- 圆角 / 间距 / 字号统一在 Layout / Typography,便于一处改全局变
 - to_tk_color() 把 8 位 hex 退成 6 位,给 Tk widget bg/fg 用
 """
 
@@ -27,20 +29,29 @@ LEVEL_UNKNOWN = "unknown"
 
 
 class DarkPalette:
-    """macOS Sonoma 深色调色板(默认)。"""
+    """深色调色板(默认)。
 
-    BG = "#1E1E1E"
-    BG_VIBRANCY = "#1E1E1ECC"
-    CARD = "#2A2A2A"
-    CARD_HOVER = "#323232"
-    CARD_PRESSED = "#3A3A3A"
-    BAR_BG = "#3A3A3A"
-    BAR_BG_AMOUNT = "#2A2630"
-    CARD_AMOUNT = "#1d1b25"
-    TEXT = "#FFFFFF"
-    TEXT_DIM = "#FFFFFFA0"
-    TEXT_DISABLED = "#FFFFFF4D"
-    DIVIDER = "#FFFFFF14"
+    灰阶是一条五级斜坡,每级约 10 个通道值:
+        BG < CARD < CARD_HOVER < CARD_PRESSED < BAR_BG
+    原先 CARD_HOVER / BAR_BG / CARD_PRESSED 是同一个色,
+    hover、进度轨道、按下三者视觉上完全分不开。
+
+    CARD 只作"填充面"(输入框 / 菜单 / tooltip)的底,
+    行卡不铺底色——行与行之间靠 DIVIDER 分割线分隔。
+    """
+
+    BG = "#101012"
+    BG_VIBRANCY = "#101012E6"
+    CARD = "#1A1A1F"
+    CARD_HOVER = "#232329"
+    CARD_PRESSED = "#2C2C34"
+    BAR_BG = "#35353E"
+    BAR_BG_AMOUNT = BAR_BG
+    CARD_AMOUNT = CARD
+    TEXT = "#F2F2F5"
+    TEXT_DIM = "#FFFFFF8C"
+    TEXT_DISABLED = "#FFFFFF40"
+    DIVIDER = "#FFFFFF16"
 
     BLUE = "#0A84FF"
     GREEN = "#30D158"
@@ -74,24 +85,26 @@ class DarkPalette:
 
 
 class LightPalette:
-    """macOS Sonoma 浅色调色板。
+    """浅色调色板。
 
-    数值参考 Apple HIG Light mode + 一点点灰阶,
-    卡片白底 + 浅灰底边,文字几乎全黑,辅助 80% 黑。
+    与深色同构的五级斜坡(每级约 10 个通道值,反向):
+        BG > CARD > CARD_HOVER > CARD_PRESSED > BAR_BG
+    BG 接近纯白而不是灰白:极简风里窗口底色越白,填充面(CARD)的
+    那一层灰就越显得"有",不需要再压深 BG 制造层次。
     """
 
-    BG = "#F5F5F7"
-    BG_VIBRANCY = "#F5F5F7E6"
-    CARD = "#FFFFFF"
-    CARD_HOVER = "#FAFAFC"
-    CARD_PRESSED = "#F2F2F4"
-    BAR_BG = "#E5E5EA"
-    BAR_BG_AMOUNT = "#FAF8F2"
-    CARD_AMOUNT = "#FBF9F2"
+    BG = "#FCFCFD"
+    BG_VIBRANCY = "#FCFCFDE6"
+    CARD = "#F1F1F4"
+    CARD_HOVER = "#E8E8ED"
+    CARD_PRESSED = "#DEDEE4"
+    BAR_BG = "#D2D2DA"
+    BAR_BG_AMOUNT = BAR_BG
+    CARD_AMOUNT = CARD
     TEXT = "#000000"
-    TEXT_DIM = "#00000080"
-    TEXT_DISABLED = "#00000033"
-    DIVIDER = "#00000014"
+    TEXT_DIM = "#0000008C"
+    TEXT_DISABLED = "#00000040"
+    DIVIDER = "#00000016"
 
     BLUE = "#007AFF"
     GREEN = "#34C759"
@@ -278,25 +291,40 @@ def _refresh_level_color():
 
 
 class Layout:
-    """macOS 风圆角与间距。
+    """圆角与间距。
 
-    与现有 v2.1 panel.py 的 MIN_W/MIN_H/EDGE_SNAP/RESIZE_GRIP 保持一致,
-    新增的字段都是 macOS 风特有。
+    这些常量以前是"定义了但没人引用"的死配置——圆角交给 DWM、间距散落
+    成几十处 magic number。现在 ui.paint / ui.panel / ui.essential_bar 都从
+    这里取值,改一处即全局生效。
+
+    RADIUS_WIN 只是一个参照值:窗口走 overrideredirect,圆角由 DWM 的
+    DWMWCP_ROUND 决定,这个值控制不了它。
     """
 
-    RADIUS_WIN = 12
-    RADIUS_CARD = 10
-    RADIUS_BTN = 6
-    RADIUS_BAR = 4
+    RADIUS_WIN = 10
+    RADIUS_CARD = 8
+    RADIUS_BTN = 5
+    # 与胶囊的 r = h/2 一致:ROW_BAR_HEIGHT 12 → 6,BAR_HEIGHT 6 → 3,
+    # 最小的一档是 3,所以常量取 3 才与实绘半径不打架。
+    RADIUS_BAR = 3
 
     BAR_HEIGHT = 6
     ROW_BAR_HEIGHT = 12
+
     PAD = 10
     PAD_X = 12
     PAD_Y = 8
+    # 行与行之间靠分割线而不是圆角底色块分隔,这两个值只管
+    # 分割线上下的留白,别再加行内底色,那会把斜坡压平。
+    ROW_GAP = 2
+    ROW_PAD_Y = 7
 
     TRAFFIC_DOT = 12
     TRAFFIC_GAP = 8
+
+    # 拖拽落位指示线的高度。ui/model_panel.py 也画同一条线,以前一个 3px
+    # 一个 2px,同一屏出现两种粗细的指示线。
+    DRAG_MARKER = 2
 
     HEADER_HEIGHT = 36
     FOOTER_HEIGHT = 24
@@ -307,21 +335,28 @@ class Layout:
     MAX_H = 900
 
     ESSENTIAL_W = 240
-    ESSENTIAL_H = 56
+    # 56 装不下:Typography.NUM_SIZE(20pt)在 YaHei UI 下行高约 41px,
+    # 加上 8px 顶留白和 6px 条 + 12px 留白,进度条被挤到可视区外——
+    # 折叠态只剩一行大字,滑块不见了。64 才有"大数字 + 一条胶囊"的余地。
+    ESSENTIAL_H = 64
 
     EDGE_SNAP = 20
     RESIZE_GRIP = 16
 
 
 class Typography:
-    """字号规范。Family 由 ui.fonts 决定,这里只管 size 与 weight。"""
+    """字号规范。Family 由 ui.fonts 决定,这里只管 size 与 weight。
 
-    TITLE_SIZE = 13
+    最小可读字号是 10:原来 8pt/9pt 的中文在 Windows 上笔画粘连,
+    且与 10/13/14 混用不成阶梯。现在只有 9/10/11/12 四档正文 + 20 大数字。
+    """
+
+    TITLE_SIZE = 12
     TITLE_WEIGHT = "bold"
-    BODY_SIZE = 13
-    NUM_SIZE = 22
-    NUM_SMALL_SIZE = 11
-    DETAIL_SIZE = 11
+    BODY_SIZE = 11
+    NUM_SIZE = 20
+    NUM_SMALL_SIZE = 12
+    DETAIL_SIZE = 10
     FOOTER_SIZE = 10
     BADGE_SIZE = 9
 
