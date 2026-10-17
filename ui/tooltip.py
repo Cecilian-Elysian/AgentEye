@@ -1,6 +1,8 @@
 """轻量 tooltip。
 
-model_panel 原有一份私有实现,行卡也要用后抽成共享模块:
+model_panel 原有一份私有实现,行卡也要用后抽成共享模块。model_panel 那份
+少了 <Destroy> 绑定,列表重渲染后弹窗会留在已销毁的父窗口上,所以现在
+两边统一走这里:
 - attach(widget, get_text):进入 600ms 后显示,get_text() 返回 None
   则不显示(行卡的文本随轮询变化,所以传 getter 而不是静态串)
 - 主题色实时取 PALETTE,不冻结
@@ -9,7 +11,8 @@ model_panel 原有一份私有实现,行卡也要用后抽成共享模块:
 
 import tkinter as tk
 
-from ui.theme import PALETTE, to_tk_color
+from ui.theme import PALETTE, Typography, to_tk_color
+from ui.fonts import pick_ui_family
 
 
 def attach(widget, get_text, delay_ms=600, owner=None):
@@ -52,11 +55,11 @@ def attach(widget, get_text, delay_ms=600, owner=None):
         win.wm_overrideredirect(True)
         win.wm_geometry(f"+{x}+{y}")
         tk.Label(win, text=text,
-                 bg=to_tk_color(PALETTE.CARD_HOVER),
+                 bg=to_tk_color(PALETTE.CARD),
                  fg=to_tk_color(PALETTE.TEXT),
-                 font=("Microsoft YaHei UI", 9),
+                 font=(pick_ui_family(), Typography.DETAIL_SIZE),
                  justify="left", padx=8, pady=3,
-                 relief="flat").pack()
+                 relief="flat", bd=0).pack()
         state["win"] = win
 
     def _schedule(_event=None):

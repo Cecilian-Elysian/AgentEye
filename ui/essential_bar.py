@@ -1,4 +1,4 @@
-"""Essential 紧凑条带视图(240×56)。
+﻿"""Essential 紧凑条带视图(240×56)。
 
 把多个 provider 折算成一行总览:
 - 主值:总余额 / 今日已用 / 总百分比中取最严重的一项
@@ -15,9 +15,31 @@ import time
 import tkinter as tk
 import weakref
 
-from ui.theme import PALETTE, Layout, usage_color, bind_theme_listener, to_tk_color, to_tk_color_blended
-from ui.fonts import fonts
-from ui.panel import _usage_ratio, _rounded_points
+from ui.theme import (PALETTE, Layout, Typography, usage_color,
+                      bind_theme_listener, to_tk_color, to_tk_color_blended)
+from ui.fonts import fonts, pick_ui_family
+from ui.paint import (capsule_items, draw_capsule, bind_hover_bg,
+                      bind_press_bg)
+from ui.panel import _usage_ratio
+
+
+def _font(fonts_dict, key, fallback_size, bold=False):
+    """从 fonts_dict 取字号规格,缺键退回本模块自建的阶梯。
+
+    调用方传的字典不一定带全 Typography 的每个键(测试里就只给
+    ui/mono/title 三个),缺键直接 KeyError 会让 EssentialBar 整个建不起来,
+    而这条带的构造在窗口初始化路径上,炸在这里等于整个应用起不来。
+
+    fonts() 里 "ui"/"mono" 两项只是 family 字符串(不是 (family,size)
+    元组),所以取到字符串时要把 fallback_size 补上,否则等于没指定字号。
+    """
+    spec = (fonts_dict or {}).get(key)
+    if isinstance(spec, (tuple, list)) and spec:
+        return tuple(spec)
+    family = spec if isinstance(spec, str) else (fonts_dict or {}).get("ui")
+    if not isinstance(family, str):
+        family = pick_ui_family()
+    return (family, fallback_size, "bold") if bold else (family, fallback_size)
 
 # 活着且还在跑 1Hz 定时器的 EssentialBar。测试之间由 conftest 统一
 # stop(),生产代码不需要读它。
@@ -29,15 +51,6 @@ def _fmt_money(unit, value):
         return "-"
     try:
         return f"{unit}{value:,.2f}"
-    except (TypeError, ValueError):
-        return "-"
-
-
-def _fmt_pct(value):
-    if value is None:
-        return "-"
-    try:
-        return f"{int(round(value))}%"
     except (TypeError, ValueError):
         return "-"
 
@@ -122,6 +135,21 @@ def _main_value(row):
     return "—", "—"
 
 
+def _value_color(ratio, level):
+    """主值的前景色。
+
+    正常档返回 TEXT 而不是 ok 绿:折叠态整条带子只有这一个数字,把它染成
+    高饱和绿会像一盏警示灯——而"额度还够"恰恰是不需要提醒的状态。
+    warn / critical 才上色,让有限的颜色预算全花在异常上。
+    """
+    if ratio is None:
+        return to_tk_color(PALETTE.TEXT)
+    r = max(0.0, min(1.0, ratio))
+    if r <= 0.5:
+        return to_tk_color(PALETTE.WARN if r > 0.2 else PALETTE.TEXT)
+    return to_tk_color(PALETTE.CRITICAL)
+
+
 class EssentialBar:
     """240×56 单行总览视图。
 
@@ -129,11 +157,12 @@ class EssentialBar:
         bar = EssentialBar(parent, state, cfg, fonts_dict,
                            on_expand=lambda: mac.toggle_mode(),
                            on_open_models=lambda name: open_model_panel(name))
-        bar.pack(...)
+
+    parent 由 MacWindow 负责 pack/unpack,本类会把自己 pack 进 parent。
     """
 
-    W = 240
-    H = 56
+    W = Layout.ESSENTIAL_W
+    H = Layout.ESSENTIAL_H
 
     def __init__(self, parent, state, cfg, fonts_dict, on_expand=None,
                  on_pin_toggle=None, on_open_models=None):
@@ -151,62 +180,57 @@ class EssentialBar:
         self._tick_after_id = None
         _LIVE_BARS.add(self)
 
-        self.frame = tk.Frame(parent, bg=PALETTE.BG,
+        self.frame = tk.Frame(parent, bg=to_tk_color(PALETTE.BG),
                               width=self.W, height=self.H,
                               cursor="hand2")
         self.frame.pack_propagate(False)
+        # 自己 pack 进 parent:MacWindow 切模式时 pack 的是父 slot
+        # (essential_slot)而不是视图根,把视图根 pack 进一个没被 pack 的
+        # slot 会让它永远不 mapped——折叠模式整个是空窗。
+        self.frame.pack(fill="both", expand=True)
 
-        top = tk.Frame(self.frame, bg=PALETTE.BG)
-        top.pack(fill="x", padx=Layout.PAD_X, pady=(8, 0))
+        top = tk.Frame(self.frame, bg=to_tk_color(PALETTE.BG))
+        top.pack(fill="x", padx=Layout.PAD_X, pady=(6, 0))
 
         self.value_lbl = tk.Label(
             top, text="—",
-            font=(fonts_dict["mono"], 13, "bold"),
-            fg=to_tk_color(PALETTE.TEXT), bg=PALETTE.BG, anchor="w",
+            font=_font(fonts_dict, "num", Typography.NUM_SIZE),
+            fg=to_tk_color(PALETTE.TEXT), bg=to_tk_color(PALETTE.BG),
+            anchor="w",
         )
         self.value_lbl.pack(side="left")
 
         self.sub_lbl = tk.Label(
             top, text="",
-            font=(fonts_dict["ui"], 10),
-            fg=to_tk_color_blended(PALETTE.TEXT_DIM), bg=PALETTE.BG, anchor="w",
+            font=_font(fonts_dict, "detail", Typography.DETAIL_SIZE),
+            fg=to_tk_color_blended(PALETTE.TEXT_DIM),
+            bg=to_tk_color(PALETTE.BG), anchor="w",
         )
         self.sub_lbl.pack(side="left", padx=(6, 0))
 
         self._chevron = tk.Label(
             top, text="›",
-            font=(fonts_dict["ui"], 14, "bold"),
-            fg=to_tk_color_blended(PALETTE.TEXT_DIM), bg=PALETTE.BG, anchor="e", cursor="hand2",
+            font=_font(fonts_dict, "num", Typography.NUM_SIZE, bold=True),
+            fg=to_tk_color_blended(PALETTE.TEXT_DIM),
+            bg=to_tk_color(PALETTE.BG), cursor="hand2",
         )
-        self._chevron.pack(side="right", padx=(4, 0))
+        self._chevron.pack(side="right")
         self._chevron.bind("<Enter>", lambda e: self._chevron.config(fg=to_tk_color(PALETTE.TEXT)))
         self._chevron.bind("<Leave>",
                            lambda e: self._chevron.config(fg=to_tk_color_blended(PALETTE.TEXT_DIM)))
         self._chevron.bind("<Button-1>", self._on_chevron_click, add="+")
 
-        self.pct_lbl = tk.Label(
-            top, text="",
-            font=(fonts_dict["ui"], 10, "bold"),
-            fg=to_tk_color(PALETTE.TEXT), bg=PALETTE.BG, anchor="e",
-        )
-        self.pct_lbl.pack(side="right")
-
-        bar_holder = tk.Frame(self.frame, bg=PALETTE.BG)
-        bar_holder.pack(fill="x", padx=Layout.PAD_X,
-                        pady=(6, 0))
+        bar_holder = tk.Frame(self.frame, bg=to_tk_color(PALETTE.BG))
+        bar_holder.pack(fill="x", padx=Layout.PAD_X, pady=(4, 0))
 
         self.bar_canvas = tk.Canvas(
             bar_holder, height=Layout.BAR_HEIGHT,
-            bg=PALETTE.BAR_BG, highlightthickness=0, bd=0,
+            bg=to_tk_color(PALETTE.BAR_BG), highlightthickness=0, bd=0,
         )
         self.bar_canvas.pack(side="left", fill="x", expand=True)
 
-        # 与展开面板的行内条同款胶囊(12 点圆角),直角矩形版废弃
-        poly_kw = {"outline": "", "width": 0, "smooth": True,
-                   "splinesteps": 12}
-        self.bar_track = self.bar_canvas.create_polygon(0, 0, 0, 0, **poly_kw)
-        self.bar_rect = self.bar_canvas.create_polygon(
-            0, 0, 0, 0, **dict(poly_kw, state="hidden"))
+        self.bar_track, self.bar_rect = capsule_items(
+            self.bar_canvas, height=Layout.BAR_HEIGHT)
         self.bar_canvas.bind(
             "<Configure>",
             lambda e: self._on_bar_configure(e),
@@ -214,22 +238,33 @@ class EssentialBar:
 
         self.countdown_lbl = tk.Label(
             bar_holder, text="",
-            font=(fonts_dict["ui"], 9),
-            fg=to_tk_color_blended(PALETTE.TEXT_DIM), bg=PALETTE.BG, anchor="e",
+            # 倒计时是纯 ASCII,用等宽:三个字段刷新时数字不会左右跳
+            font=_font(fonts_dict, "mono", Typography.BADGE_SIZE),
+            fg=to_tk_color_blended(PALETTE.TEXT_DIM),
+            bg=to_tk_color(PALETTE.BG), anchor="e",
         )
         self.countdown_lbl.pack(side="right", padx=(6, 0))
 
         self._last_bar_width = 0
-        self._last_bar_color = PALETTE.GREEN
+        self._last_bar_color = to_tk_color(PALETTE.GREY)
         self._last_bar_frac = 0.0
         self._disp_frac = None
         self._bar_target = 0.0
         self._animating = False
 
         self.frame.bind("<Button-1>", self._on_click)
-        for w in (top, self.value_lbl, self.sub_lbl, self.pct_lbl,
-                  bar_holder, self.bar_canvas, self.countdown_lbl):
+        chain = [self.frame, top, self.value_lbl, self.sub_lbl,
+                 self._chevron, bar_holder, self.bar_canvas,
+                 self.countdown_lbl]
+        for w in chain:
             w.bind("<Button-1>", self._on_click, add="+")
+        # 整条带子可点却零 hover 反馈:光标是手型,按下去也不知道按到了没有。
+        # bar_canvas 也在链里,底色跟着一起变,不会留一条异色带。
+        self._hover_chain = chain
+        bind_hover_bg(chain, lambda: to_tk_color(PALETTE.CARD_HOVER),
+                      lambda: to_tk_color(PALETTE.BG))
+        bind_press_bg(chain, lambda: to_tk_color(PALETTE.CARD_PRESSED),
+                      lambda: to_tk_color(PALETTE.BG))
 
         bind_theme_listener(self.frame, self.refresh_palette)
         self._tick()
@@ -244,35 +279,41 @@ class EssentialBar:
             pass
 
     def refresh_palette(self, *_args):
-        """主题切换时刷新所有 widget 的 bg/fg。"""
+        """主题切换时刷新所有 widget 的 bg/fg,以及胶囊轨道色。
+
+        胶囊的轨道/填充是 canvas 图元,configure(bg) 够不到,必须显式
+        itemconfig——漏刷就是浅色主题残留深色轨道(AGENTS.md 规则 3)。
+        """
+        bg = to_tk_color(PALETTE.BG)
+        dim = to_tk_color_blended(PALETTE.TEXT_DIM)
         try:
-            bg = PALETTE.BG
             self.frame.configure(bg=bg)
             for w in self.frame.winfo_children():
                 try:
                     w.configure(bg=bg)
                 except tk.TclError:
                     pass
-            for w in (self.value_lbl, self.sub_lbl,
-                      self.pct_lbl, self.countdown_lbl):
+            for w in (self.value_lbl, self.sub_lbl, self.countdown_lbl):
                 try:
-                    if w is self.sub_lbl or w is self.countdown_lbl:
-                        w.configure(fg=to_tk_color_blended(PALETTE.TEXT_DIM))
-                    else:
-                        w.configure(fg=to_tk_color(PALETTE.TEXT))
+                    w.configure(fg=dim if w is not self.value_lbl
+                                else to_tk_color(PALETTE.TEXT), bg=bg)
                 except tk.TclError:
                     pass
             try:
-                self._chevron.configure(bg=bg, fg=to_tk_color_blended(PALETTE.TEXT_DIM))
+                self._chevron.configure(bg=bg, fg=dim)
             except (tk.TclError, AttributeError):
                 pass
-            self.bar_canvas.configure(bg=PALETTE.BAR_BG)
+            track_color = to_tk_color(PALETTE.BAR_BG)
+            self.bar_canvas.configure(bg=track_color)
             try:
-                self.bar_canvas.itemconfig(self.bar_track, fill=PALETTE.BAR_BG)
+                self.bar_canvas.itemconfig(self.bar_track, fill=track_color)
             except (tk.TclError, AttributeError):
                 pass
         except tk.TclError:
             pass
+        # _update 只在签名变化时改主值颜色,所以这里要主动重算一次,
+        # 否则切主题后主值停在旧色的等级色上。
+        self._sig = None
         self._update()
 
     def _on_click(self, _event=None):
@@ -292,26 +333,11 @@ class EssentialBar:
     def _redraw_bar(self):
         if self._last_bar_width < 2:
             return
-        h = Layout.BAR_HEIGHT
-        r = h / 2.0
-        w = self._last_bar_width
-        try:
-            self.bar_canvas.coords(self.bar_track,
-                                   *_rounded_points(0, 0, w, h, r))
-            self.bar_canvas.itemconfig(self.bar_track, fill=PALETTE.BAR_BG,
-                                       state="normal")
-            x2 = int(w * self._last_bar_frac)
-            if x2 < 2 * r:
-                # 不足一个圆头直径不画,与行内条同一策略
-                self.bar_canvas.itemconfig(self.bar_rect, state="hidden")
-            else:
-                self.bar_canvas.coords(self.bar_rect,
-                                       *_rounded_points(0, 0, x2, h, r))
-                self.bar_canvas.itemconfig(self.bar_rect,
-                                           fill=self._last_bar_color,
-                                           state="normal")
-        except tk.TclError:
-            pass
+        draw_capsule(self.bar_canvas, self.bar_track, self.bar_rect,
+                     self._last_bar_width, self._last_bar_frac,
+                     self._last_bar_color,
+                     track_color=to_tk_color(PALETTE.BAR_BG),
+                     height=Layout.BAR_HEIGHT)
 
     def _tick(self):
         self._tick_after_id = None
@@ -350,16 +376,16 @@ class EssentialBar:
             color = usage_color(ratio) if ratio is not None else PALETTE.GREY
 
             main, sub = _main_value(worst)
-            pct_text = ""
-            if worst is not None:
-                pct = worst.get("pct")
-                if isinstance(pct, (int, float)) and not isinstance(pct, bool):
-                    pct_text = _fmt_pct(pct)
-            self.value_lbl.config(text=main, fg=color)
-            self.sub_lbl.config(text=sub, fg=to_tk_color_blended(PALETTE.TEXT_DIM))
-            self.pct_lbl.config(text=pct_text, fg=color)
+            # 只留一个百分比:主值已经是「已用 27%」,再在右边挂一个剩余
+            # 73% 是同一份数据的另一面,240px 宽里两处读同一个数,只会
+            # 让人多看一眼却读不出新信息。剩余量由胶囊条承担。
+            self.value_lbl.config(text=main,
+                                  fg=_value_color(ratio,
+                                                  (worst or {}).get("level")))
+            self.sub_lbl.config(text=sub,
+                                fg=to_tk_color_blended(PALETTE.TEXT_DIM))
 
-            self._last_bar_color = color
+            self._last_bar_color = to_tk_color(color)
             self._bar_target = ratio if ratio is not None else 0.0
 
         self._update_countdown(results)
@@ -398,7 +424,9 @@ class EssentialBar:
             else:
                 self.countdown_lbl.config(text="")
         else:
-            self.countdown_lbl.config(text=f"⏱ {_short_countdown(nearest - now)}")
+            # 不加 ⏱ 之类的符号前缀:那类字形靠 Segoe UI Symbol 兜底,
+            # 换一台机器字形就不一样,倒计时是纯数字,自己就够表意了。
+            self.countdown_lbl.config(text=_short_countdown(nearest - now))
 
     def destroy(self):
         try:

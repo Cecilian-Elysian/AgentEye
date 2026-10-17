@@ -7,7 +7,35 @@ Actions 通过 callbacks 注入,保持解耦。
 
 import tkinter as tk
 
-from ui.theme import PALETTE, to_tk_color
+from ui.theme import PALETTE, Layout, Typography, to_tk_color, to_tk_color_blended
+from ui.fonts import pick_ui_family
+
+
+def menu_colors():
+    """弹出菜单的四态配色,现取 PALETTE——菜单是瞬态的,
+    下次弹出自然就用当前主题,不需要监听刷新。"""
+    return {
+        "bg": to_tk_color(PALETTE.CARD),
+        "fg": to_tk_color(PALETTE.TEXT),
+        "activebackground": to_tk_color(PALETTE.CARD_HOVER),
+        "activeforeground": to_tk_color(PALETTE.TEXT),
+        "disabledforeground": to_tk_color_blended(PALETTE.TEXT_DISABLED),
+    }
+
+
+def build_menu(parent, bd=0):
+    """建一个极简风弹出菜单。
+
+    tk.Menu 的默认边框和 8px 内边距是 Windows 主题画的,bd=0 关不掉那圈
+    立体边(要用 activeborderwidth / relief 一起压);菜单项字号走
+    TkMenuFont,和面板文字不同步,所以这里显式给 font。
+    """
+    return tk.Menu(
+        parent, tearoff=0, bd=bd, relief="flat",
+        activeborderwidth=0,
+        font=(pick_ui_family(), Typography.BODY_SIZE),
+        **menu_colors()
+    )
 
 
 class RowMenu:
@@ -16,15 +44,7 @@ class RowMenu:
         self.parent = parent
         self._on_delete_raw = on_delete
         self._delete_target = None
-        # 默认 tk.Menu 是系统灰,在深色窗口旁边非常突兀;配色实时取
-        # PALETTE(菜单是瞬态的,主题切换后下次弹出自然刷新)
-        self.menu = tk.Menu(
-            parent, tearoff=0, bd=0,
-            bg=to_tk_color(PALETTE.CARD),
-            fg=to_tk_color(PALETTE.TEXT),
-            activebackground=to_tk_color(PALETTE.CARD_HOVER),
-            activeforeground=to_tk_color(PALETTE.TEXT),
-        )
+        self.menu = build_menu(parent)
         self.menu.add_command(label="立即刷新此行", command=on_refresh)
         self.menu.add_command(label="查看模型列表", command=on_show_models)
         self.menu.add_command(label="试调模型…", command=on_probe)

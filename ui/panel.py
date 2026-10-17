@@ -4,6 +4,7 @@
 - 底部:状态栏 (下次刷新倒计时)
 - 交互:拖拽带边缘磁吸,光标反馈,快捷键 (F5/Esc/Ctrl+Q)
 - 颜色:基于消耗比的绿→黄→红渐变,主值与 detail 中所有金额/百分比同步上色
+- 排版:行不铺底色块,行与行之间靠 1px DIVIDER 分割线分隔
 - 主题:读 ui.theme.PALETTE,主题切换时通过 _refresh_palette() 重画所有 row / header / footer / grip
 """
 
@@ -13,26 +14,34 @@ import tkinter as tk
 import weakref
 
 import config as config_mod
-from ui.theme import PALETTE, Layout, set_theme, bind_theme_listener, to_tk_color, to_tk_color_blended
+from ui.theme import (PALETTE, Layout, Typography, set_theme,
+                      bind_theme_listener, to_tk_color, to_tk_color_blended)
+from ui.paint import (rounded_points as _rounded_points, capsule_items,
+                      draw_capsule, hairline, bind_hover_bg, bind_press_bg,
+                      FlatButton, bind_wheel_tree, tag_subtree, wheel_tag)
 from ui.scrollbar_style import make_dark_scrollbar
+from ui.row_menu import build_menu
 from ui.screen import work_area, snap_clamp
 
-FONT = "Microsoft YaHei UI"
+from ui.fonts import pick_ui_family
+
+FONT = pick_ui_family()
 
 C = {
     "bg": to_tk_color(PALETTE.BG),
     "card": to_tk_color(PALETTE.CARD),
     "card_hover": to_tk_color(PALETTE.CARD_HOVER),
+    "card_pressed": to_tk_color(PALETTE.CARD_PRESSED),
     "bar_bg": to_tk_color(PALETTE.BAR_BG),
+    "divider": to_tk_color_blended(PALETTE.DIVIDER),
     "text": to_tk_color(PALETTE.TEXT),
     "dim": to_tk_color_blended(PALETTE.TEXT_DIM),
+    "disabled": to_tk_color_blended(PALETTE.TEXT_DISABLED),
     "ok": to_tk_color(PALETTE.OK),
     "warn": to_tk_color(PALETTE.WARN),
     "critical": to_tk_color(PALETTE.CRITICAL),
     "error": to_tk_color(PALETTE.ERROR),
     "off": to_tk_color(PALETTE.OFF),
-    "card_amount": to_tk_color(PALETTE.CARD_AMOUNT),
-    "card_pressed": to_tk_color(PALETTE.CARD_PRESSED),
 }
 
 LEVEL_COLOR = {k: C[k] for k in ("ok", "warn", "critical", "error")}
@@ -40,13 +49,7 @@ LEVEL_COLOR["unconfigured"] = C["off"]
 LEVEL_COLOR["paused"] = C["off"]
 LEVEL_COLOR["unknown"] = C["dim"]
 
-EDGE_SNAP = 20
 FIRST_RUN_FLAG = "~/.agenteye/.first_run_done"
-MIN_W, MIN_H = 280, 180
-MAX_W, MAX_H = 800, 900
-RESIZE_GRIP = 16
-BTN_BG = "#2a2a3a"
-BTN_HOVER = "#34344a"
 
 # 活着且还在跑 1Hz 定时器的 Panel。测试之间由 conftest 统一 stop(),
 # 生产代码不需要读它。
@@ -57,28 +60,22 @@ def _register_self(panel):
     _LIVE_PANELS.add(panel)
 
 
-def _refresh_BTN():
-    """主题切换时同步本模块的按钮颜色常量。"""
-    global BTN_BG, BTN_HOVER
-    BTN_BG = to_tk_color(PALETTE.CARD_HOVER)
-    BTN_HOVER = to_tk_color(PALETTE.CARD_PRESSED)
-
-
 def _refresh_C():
     """主题切换时同步刷新本模块的 C / LEVEL_COLOR 字典。"""
     C["bg"] = to_tk_color(PALETTE.BG)
     C["card"] = to_tk_color(PALETTE.CARD)
     C["card_hover"] = to_tk_color(PALETTE.CARD_HOVER)
+    C["card_pressed"] = to_tk_color(PALETTE.CARD_PRESSED)
     C["bar_bg"] = to_tk_color(PALETTE.BAR_BG)
+    C["divider"] = to_tk_color_blended(PALETTE.DIVIDER)
     C["text"] = to_tk_color(PALETTE.TEXT)
     C["dim"] = to_tk_color_blended(PALETTE.TEXT_DIM)
+    C["disabled"] = to_tk_color_blended(PALETTE.TEXT_DISABLED)
     C["ok"] = to_tk_color(PALETTE.OK)
     C["warn"] = to_tk_color(PALETTE.WARN)
     C["critical"] = to_tk_color(PALETTE.CRITICAL)
     C["error"] = to_tk_color(PALETTE.ERROR)
     C["off"] = to_tk_color(PALETTE.OFF)
-    C["card_amount"] = to_tk_color(PALETTE.CARD_AMOUNT)
-    C["card_pressed"] = to_tk_color(PALETTE.CARD_PRESSED)
     LEVEL_COLOR["ok"] = C["ok"]
     LEVEL_COLOR["warn"] = C["warn"]
     LEVEL_COLOR["critical"] = C["critical"]
@@ -86,24 +83,6 @@ def _refresh_C():
     LEVEL_COLOR["unconfigured"] = C["off"]
     LEVEL_COLOR["paused"] = C["off"]
     LEVEL_COLOR["unknown"] = C["dim"]
-
-
-def _sync_to_tk():
-    """Tk 不接受 8 位 hex。widget 上的 bg/fg 已经在创建时用 to_tk_color,这里只是返回当前版本。"""
-    return {
-        "bg": to_tk_color(PALETTE.BG),
-        "card": to_tk_color(PALETTE.CARD),
-        "card_hover": to_tk_color(PALETTE.CARD_HOVER),
-        "bar_bg": to_tk_color(PALETTE.BAR_BG),
-        "text": to_tk_color(PALETTE.TEXT),
-        "dim": to_tk_color(PALETTE.TEXT_DIM),
-        "ok": to_tk_color(PALETTE.OK),
-        "warn": to_tk_color(PALETTE.WARN),
-        "critical": to_tk_color(PALETTE.CRITICAL),
-        "error": to_tk_color(PALETTE.ERROR),
-        "off": to_tk_color(PALETTE.OFF),
-        "card_amount": to_tk_color(PALETTE.CARD_AMOUNT),
-    }
 
 
 def _fmt_main(result):
@@ -252,47 +231,17 @@ def _set_detail_with_tags(text_widget, text, fg):
     text_widget.config(state="disabled")
 
 
-def _rounded_points(x1, y1, x2, y2, r):
-    """12 点圆角矩形点集,配合 create_polygon(smooth=True) 画胶囊。
-
-    每个角给两个相邻边上的点,smooth 样条自动把角部圆化;
-    半径由角点间距决定,r 取条高一半即得全圆角(胶囊)。
-    """
-    return (x1 + r, y1, x2 - r, y1,
-            x2, y1, x2, y1 + r,
-            x2, y2 - r, x2, y2,
-            x2 - r, y2, x1 + r, y2,
-            x1, y2, x1, y2 - r,
-            x1, y1 + r, x1, y1)
-
-
 def _draw_capsule(bar, widgets, width, frac, color):
     """画胶囊轨道与填充。width 来自 <Configure> 或 winfo_width。
 
-    - 轨道永远画满 0..width,颜色 C["bar_bg"]
-    - 填充 0..int(width*frac);不足一个圆头直径(2r)时不画——
-      12 点点集在 x2 < 2r 时会出现反向坐标,画出来是畸形,
-      与其失真不如隐藏(不足 12px ≈ 用量 4%,肉眼本来不可辨)
-    - frac 为 None(未知占比)等同 0,绝不画满格
+    委托 ui.paint.draw_capsule——圆角点集与隐藏阈值只有一处定义。
+    轨道色取 C["bar_bg"](主题切换时同步),不是现读 PALETTE,
+    以免与 _refresh_C 的刷新时机脱节。
     """
-    h = Layout.ROW_BAR_HEIGHT
-    r = h / 2.0
-    rect = widgets.get("rect")
-    track = widgets.get("track")
-    if bar is None or rect is None:
-        return
-    try:
-        if track is not None:
-            bar.coords(track, *_rounded_points(0, 0, width, h, r))
-            bar.itemconfig(track, fill=C["bar_bg"], state="normal")
-        x2 = int(width * max(0.0, min(1.0, frac or 0.0)))
-        if x2 < 2 * r:
-            bar.itemconfig(rect, state="hidden")
-            return
-        bar.coords(rect, *_rounded_points(0, 0, x2, h, r))
-        bar.itemconfig(rect, fill=color, state="normal")
-    except tk.TclError:
-        pass
+    draw_capsule(bar, widgets.get("track"), widgets.get("rect"),
+                 width, frac, color,
+                 track_color=C["bar_bg"],
+                 height=Layout.ROW_BAR_HEIGHT)
 
 
 def _on_bar_configure(event, bar, rect, widgets):
@@ -330,9 +279,29 @@ def _is_amount_mode(result):
     return unit in ("$", "¥", "￥", "额度", "元")
 
 
+def _row_chain(card):
+    """取一行的"整链"widget 列表,底色要整链同步刷。
+
+    形状在 _row_skeleton 里定好并存回 card._row_chain,这里只取不猜——
+    递归 walk 子树会把分割线也算进去,而分割线不该跟着 hover 变,
+    漏掉或算错都会表现成行里一条异色带。
+    """
+    chain = getattr(card, "_row_chain", None)
+    return [w for w in chain if w is not None] if chain else [card]
+
+
 def _row_bg(result):
-    """金额行返回金色微调底色,额度行不变。"""
-    return C["card_amount"] if _is_amount_mode(result) else C["card"]
+    """行底色。
+
+    极简工具风里行不铺色块——行与窗口同底,靠 DIVIDER 分割线分隔。
+    原来金额行铺一层暖紫 #1d1b25、额度行铺 CARD,列表被切成两种颜色的
+    横条,靠底色区分语义;而语义该由数值颜色和进度条承担,不由底色承担。
+    副作用是 hover 不再需要"保留暖色底"的那套特判,hover / press 两档
+    对所有行一视同仁。
+
+    保留 result 参数是为了调用点不需要区分金额行与额度行。
+    """
+    return C["bg"]
 
 
 def _compute_target_static(rows, y_root):
@@ -390,8 +359,8 @@ class Panel:
 
         self._build_header()
         self.rows_container = tk.Frame(root, bg=C["bg"])
-        self.rows_container.pack(fill="both", expand=True, padx=(10, 0),
-                                  pady=(0, 0))
+        self.rows_container.pack(fill="both", expand=True,
+                                  padx=(Layout.PAD, 0), pady=(0, 0))
         self.rows_canvas = tk.Canvas(self.rows_container, bg=C["bg"],
                                      highlightthickness=0, bd=0)
         self.rows_scroll = make_dark_scrollbar(self.rows_container, orient="vertical",
@@ -406,13 +375,19 @@ class Panel:
             (0, 0), window=self.rows_frame, anchor="nw")
         self.rows_canvas.configure(yscrollcommand=self.rows_scroll.set)
         self.rows_canvas.pack(side="left", fill="both", expand=True)
-        self.rows_scroll.pack(side="right", fill="y", padx=(0, 10))
+        self.rows_scroll.pack(side="right", fill="y", padx=(0, Layout.PAD))
         self.rows_canvas.bind("<Configure>", self._on_rows_canvas_configure)
-        self.rows_canvas.bind("<Enter>", self._rows_wheel_enter)
-        self.rows_canvas.bind("<Leave>", self._rows_wheel_leave)
+        self._unbind_wheel = bind_wheel_tree(self.rows_frame,
+                                              self._on_rows_wheel)
+        # footer 之上压一条分割线:它是"全局状态"的唯一常驻出口,
+        # 不分隔的话它和最后一行读起来是同一条信息
+        self._footer_rule = hairline(root)
+        self._footer_rule.pack(side="bottom", fill="x")
         self.footer = tk.Label(
-            root, text="", font=(FONT, 8), fg=C["dim"], bg=C["bg"], anchor="w")
-        self.footer.pack(fill="x", padx=10, pady=(2, 8))
+            root, text="",
+            font=(FONT, Typography.FOOTER_SIZE),
+            fg=C["dim"], bg=C["bg"], anchor="w")
+        self.footer.pack(fill="x", padx=Layout.PAD, pady=(0, Layout.PAD_Y))
 
         # 键盘/焦点类绑定必须挂到 Toplevel。挂在 slot(Frame)上时,
         # 行内 Text 一旦吃掉焦点,Frame 的 bindtag 链不含子控件,
@@ -483,21 +458,27 @@ class Panel:
             x, y = sw - w - 20, 60
         self.root.update_idletasks()
         self.root.geometry(f"{int(w)}x{int(h)}+{int(x)}+{int(y)}")
-        self.root.minsize(MIN_W, MIN_H)
-        self.root.maxsize(MAX_W, MAX_H)
+        self.root.minsize(Layout.MIN_W, Layout.MIN_H)
+        self.root.maxsize(Layout.MAX_W, Layout.MAX_H)
 
-    def _make_hdr_btn(self, parent, text, fg=None, hover_fg=None, size=10):
-        """Header 统一按钮:flat + #2a2a3a 底,与设置对话框按钮同风格。"""
+    def _make_hdr_btn(self, parent, text, fg=None, hover_fg=None,
+                      size=Typography.FOOTER_SIZE):
+        """Header 统一按钮:静止透明(与窗口同底),hover 浮出一层填充。
+
+        底色通过读 C 现取而不是闭包捕获,这样主题切换后按钮不会停在旧色。
+        """
         base_fg = fg or C["text"]
         btn = tk.Button(parent, text=text, font=(FONT, size),
-                        bg=BTN_BG, fg=base_fg, relief="flat", bd=0,
-                        activebackground=BTN_HOVER, activeforeground=hover_fg or base_fg,
+                        bg=C["bg"], fg=base_fg, relief="flat", bd=0,
+                        activebackground=C["card_hover"],
+                        activeforeground=hover_fg or base_fg,
                         highlightthickness=0, takefocus=0, cursor="hand2",
                         padx=7, pady=0, width=1)
         btn._fg = base_fg
         btn._hover_fg = hover_fg or base_fg
-        btn.bind("<Enter>", lambda e: btn.config(bg=BTN_HOVER, fg=btn._hover_fg))
-        btn.bind("<Leave>", lambda e: btn.config(bg=BTN_BG, fg=btn._fg))
+        btn.bind("<Enter>", lambda e: btn.config(bg=C["card_hover"],
+                                                fg=btn._hover_fg))
+        btn.bind("<Leave>", lambda e: btn.config(bg=C["bg"], fg=btn._fg))
         return btn
 
     def _skip_build_header(self):
@@ -512,10 +493,11 @@ class Panel:
 
     def _build_header(self):
         header = tk.Frame(self.root, bg=C["bg"])
-        header.pack(fill="x", padx=10, pady=(8, 2))
-        tk.Label(header, text="AgentEye", font=(FONT, 10, "bold"),
+        header.pack(fill="x", padx=Layout.PAD, pady=(Layout.PAD_Y, 2))
+        tk.Label(header, text="AgentEye",
+                 font=(FONT, Typography.TITLE_SIZE, Typography.TITLE_WEIGHT),
                  fg=C["text"], bg=C["bg"]).pack(side="left")
-        self.dot = tk.Label(header, text="●", font=(FONT, 9),
+        self.dot = tk.Label(header, text="●", font=(FONT, Typography.BADGE_SIZE),
                             fg=C["dim"], bg=C["bg"])
         self.dot.pack(side="right", padx=(0, 8))
 
@@ -571,15 +553,43 @@ class Panel:
         if save_pin:
             save_pin(self._pinned)
 
+    def _pin_label(self):
+        """置顶菜单项的文案。is_pinned 缺失时退回 cfg 快照。"""
+        is_pinned = self.actions.get("is_pinned")
+        if is_pinned:
+            try:
+                pinned = bool(is_pinned())
+            except Exception:
+                pinned = bool((self.cfg.get("ui") or {}).get("pinned", True))
+        else:
+            pinned = bool((self.cfg.get("ui") or {}).get("pinned", True))
+        return "取消置顶" if pinned else "置顶显示"
+
+    def _toggle_pin_global(self):
+        """右键菜单里的置顶开关。改完立刻回写 cfg,下次弹菜单标签跟着变。"""
+        toggle_pin = self.actions.get("toggle_pin")
+        if not toggle_pin:
+            return
+        try:
+            pinned = toggle_pin()
+        except Exception:
+            return
+        if pinned is None:
+            return
+        ui = self.cfg.setdefault("ui", {})
+        ui["pinned"] = bool(pinned)
+        self._pinned = bool(pinned)
+        if not self._mac_mode:
+            btn = getattr(self, "pin_btn", None)
+            if btn is not None:
+                fg = C["ok"] if pinned else C["dim"]
+                btn.config(text="⊙" if pinned else "○", fg=fg)
+                btn._fg = fg
+
     def _build_menu(self):
-        # 与 ui/row_menu 同一套配色:默认 tk.Menu 是系统灰,
-        # 在深色窗口旁边非常突兀
-        m = tk.Menu(
-            self.root, tearoff=0, bd=0,
-            bg=C["card"], fg=C["text"],
-            activebackground=C["card_hover"],
-            activeforeground=C["text"],
-        )
+        # 与 ui/row_menu 共用 build_menu:两处各写一份 tk.Menu 参数的话,
+        # 改配色时必然漏一处,漏的那处就是深色窗口旁突然出现的系统灰菜单。
+        m = build_menu(self.root)
         m.add_command(label="立即刷新", command=self.actions["refresh_now"])
         m.add_command(label="通知测试", command=self.actions["test_notify"])
         m.add_command(label="添加 Key…",
@@ -588,6 +598,10 @@ class Panel:
         m.add_command(label="暂停轮询", command=self.actions["toggle_pause"])
         m.add_command(label="切换为单行模式",
                       command=self.actions.get("toggle_mode", lambda: None))
+        # 置顶:mac 模式下 header 里的那个按钮不存在,这里才是 mac 模式下
+        # 唯一入口。标签跟着 is_pinned 走,免得点完看不出切没切。
+        self._pin_idx = m.index("end")
+        m.add_command(label=self._pin_label(), command=self._toggle_pin_global)
         m.add_command(label="打开配置文件", command=self.actions["open_config"])
         m.add_command(label="设置…",
                       command=self.actions.get("open_settings", lambda: None))
@@ -608,6 +622,7 @@ class Panel:
         self.menu.entryconfig(
             self._pause_idx + 1,
             label="恢复轮询" if paused else "暂停轮询")
+        self.menu.entryconfig(self._pin_idx + 1, label=self._pin_label())
         try:
             self.menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -656,7 +671,7 @@ class Panel:
             x, y, self.root.winfo_width(), self.root.winfo_height(),
             work_area(x, y, (self.root.winfo_screenwidth(),
                              self.root.winfo_screenheight())),
-            EDGE_SNAP)
+            Layout.EDGE_SNAP)
         self.root.geometry(f"+{int(x)}+{int(y)}")
 
     def _drag_end(self, event):
@@ -672,14 +687,17 @@ class Panel:
 
     def _build_resize_grip(self):
         grip = tk.Frame(self.root, bg=C["bg"], cursor="size_nw_se",
-                        width=RESIZE_GRIP, height=RESIZE_GRIP)
+                        width=Layout.RESIZE_GRIP, height=Layout.RESIZE_GRIP,
+                        bd=0, highlightthickness=0)
         grip.pack(side="bottom", anchor="se")
         grip.bind("<Button-1>", self._resize_start)
         grip.bind("<B1-Motion>", self._resize_move)
         grip.bind("<ButtonRelease-1>", self._resize_end)
         for i in range(3):
-            r = tk.Frame(grip, bg=C["dim"], width=2, height=2)
-            r.place(x=RESIZE_GRIP - 2 - i * 4, y=RESIZE_GRIP - 2 - i * 4)
+            r = tk.Frame(grip, bg=C["dim"], width=2, height=2,
+                         bd=0, highlightthickness=0)
+            r.place(x=Layout.RESIZE_GRIP - 2 - i * 4,
+                    y=Layout.RESIZE_GRIP - 2 - i * 4)
         self._resize_grip = grip
 
     def _resize_start(self, event):
@@ -692,8 +710,8 @@ class Panel:
     def _resize_move(self, event):
         dx = event.x_root - self._rx
         dy = event.y_root - self._ry
-        new_w = max(MIN_W, min(MAX_W, self._rw + dx))
-        new_h = max(MIN_H, min(MAX_H, self._rh + dy))
+        new_w = max(Layout.MIN_W, min(Layout.MAX_W, self._rw + dx))
+        new_h = max(Layout.MIN_H, min(Layout.MAX_H, self._rh + dy))
         self.root.geometry(f"{int(new_w)}x{int(new_h)}")
 
     def _resize_end(self, event):
@@ -708,7 +726,6 @@ class Panel:
         """
         try:
             _refresh_C()
-            _refresh_BTN()
         except Exception:
             pass
         try:
@@ -718,6 +735,7 @@ class Panel:
             self.rows_canvas.configure(bg=C["bg"])
             self.rows_frame.configure(bg=C["bg"])
             self.footer.configure(bg=C["bg"], fg=C["dim"])
+            self._footer_rule.configure(bg=C["divider"])
         except tk.TclError:
             pass
 
@@ -725,19 +743,20 @@ class Panel:
             if not isinstance(widgets, dict):
                 continue
             try:
-                bg = _row_bg({"unit": ("$" if widgets.get("is_amount") else "")})
                 card = widgets.get("frame")
-                if card:
-                    card.configure(bg=bg)
+                bg = card._bg if card is not None else C["bg"]
+                if card is not None:
                     card._bg = bg
-                    for child in card.winfo_children():
-                        try:
-                            child.configure(bg=bg)
-                        except tk.TclError:
-                            pass
+                # 整链刷:只刷 card 的底色会让子 Frame 停在旧色,
+                # 鼠标再划一次就能看到"外亮内暗"的割裂环。
+                for w in _row_chain(card):
+                    try:
+                        w.configure(bg=bg)
+                    except tk.TclError:
+                        pass
                 bar = widgets.get("bar")
                 if bar is not None:
-                    # canvas 底色由上面的 child 循环刷成卡片色;胶囊本体
+                    # canvas 底色由上面的链刷成窗口底色;胶囊本体
                     # (轨道/填充)是 canvas 图元,configure(bg) 够不到,
                     # 轨道色必须在这里重设,否则浅色主题残留深色轨道。
                     track = widgets.get("track")
@@ -757,6 +776,8 @@ class Panel:
                             w.configure(bg=bg)
                         elif key == "detail":
                             w.configure(fg=C["dim"], bg=bg)
+                            for tag in ("dim", "highlight"):
+                                w.tag_config(tag, foreground=C["dim"])
                     except tk.TclError:
                         pass
             except Exception:
@@ -789,12 +810,11 @@ class Panel:
             return
         if width <= 1:
             return
-        # detail 是 Text(wrap="word"),按像素自动换行;但 width 以
-        # "平均字符"计且创建后固定,窗口拉宽后长 detail 不会利用新
-        # 空间。按窗口宽估字符数同步放大(9pt 下 ≈7px/字符)。
-        # 原实现 configure(wraplength=...) —— Text 没有该选项,每次
-        # TclError 被吞,整个回调是死代码。
-        chars = max(12, (width - 32) // 7)
+        # detail 是 Text(wrap="word"),自动换行;但 Text 的 width 以
+        # "平均字符"计且创建后固定,窗口拉宽后长 detail 不会利用新空间。
+        # 之前按 "9pt ≈ 7px/字符" 硬估,换字号即失效;这里用真实字体
+        # 度量当前字号下一个中文字的宽度。
+        chars = max(12, int((width - 32) // self._char_width()))
         for w in self._rows.values():
             d = w.get("detail")
             if d is not None:
@@ -802,6 +822,23 @@ class Panel:
                     d.configure(width=chars)
                 except tk.TclError:
                     pass
+
+    def _char_width(self):
+        """一个中文字在该字号下的像素宽度,带缓存。
+
+        中文字形是全角,拿它当基准才不会在中文 detail 上算窄一档。
+        """
+        cached = getattr(self, "_char_w", None)
+        if cached:
+            return cached
+        try:
+            import tkinter.font as tkfont
+            f = tkfont.Font(self.root, font=(FONT, Typography.DETAIL_SIZE))
+            w = max(1.0, float(f.measure("额")))
+        except Exception:
+            w = 12.0
+        self._char_w = w
+        return w
 
     def _close_any_popup(self):
         """Esc 关掉最上层的对话框。
@@ -843,25 +880,17 @@ class Panel:
             pass
 
     def _rows_wheel_enter(self, event):
-        try:
-            # 记下 funcid,离开时只摘自己那一个。unbind_all(sequence) 会把
-            # "all" bindtag 上该序列的**所有**绑定清掉,包括设置对话框和
-            # 模型面板的 —— 于是"面板行区 → 设置列表 → 移出"之后,
-            # 面板的滚轮就没了,直到鼠标重新进出行区。
-            self._rows_wheel_funcid = self.rows_canvas.bind_all(
-                "<MouseWheel>", self._on_rows_wheel, add="+")
-        except tk.TclError:
-            pass
+        """已废弃:滚轮改由 bind_wheel_tree 常驻挂在 rows_frame 子树上。
+
+        旧的 <Enter>/<Leave> + bind_all 组合有两个问题(见 ui/paint 的
+        bind_wheel_tree 注释):移出列表时 unbind_all(sequence, funcid)
+        抛 TypeError,而没摘干净的全局绑定会把所有对话框的滚轮都抢走。
+        保留这两个方法只为不打断既有调用点。
+        """
+        return None
 
     def _rows_wheel_leave(self, event):
-        fid = getattr(self, "_rows_wheel_funcid", None)
-        self._rows_wheel_funcid = None
-        if fid is None:
-            return
-        try:
-            self.rows_canvas.unbind_all("<MouseWheel>", fid)
-        except tk.TclError:
-            pass
+        return None
 
     def _drag_press(self, event, name):
         value_lbl = self._rows.get(name, {}).get("value")
@@ -924,8 +953,9 @@ class Panel:
             return
         cards = [w for w in self.rows_frame.pack_slaves()
                  if w is not d.get("widget")]
-        indicator = tk.Frame(self.rows_frame, height=3,
-                             bg=PALETTE.BLUE)
+        indicator = tk.Frame(self.rows_frame, height=Layout.DRAG_MARKER,
+                             bg=to_tk_color(PALETTE.BLUE), bd=0,
+                             highlightthickness=0)
         d["indicator"] = indicator
         idx = d["target"]
         if idx < len(cards):
@@ -937,10 +967,12 @@ class Panel:
         if dragged is not None:
             try:
                 dragged._drag_active = True
-                dragged.configure(bg=C["card_pressed"])
-                for child in dragged.winfo_children():
+                # 被拖的行整链压暗,不只是最外层 card——只改外层的话
+                # 子 Frame 保持原色,拖起来像卡片里亮着一块。
+                pressed = C["card_pressed"]
+                for w in _row_chain(dragged):
                     try:
-                        child.configure(bg=C["card_pressed"])
+                        w.configure(bg=pressed)
                     except tk.TclError:
                         pass
             except tk.TclError:
@@ -957,9 +989,8 @@ class Panel:
         if d and d.get("widget"):
             w = d["widget"]
             try:
-                original_bg = getattr(w, "_bg", C["card"])
-                w.configure(bg=original_bg)
-                for child in w.winfo_children():
+                original_bg = getattr(w, "_bg", C["bg"])
+                for child in _row_chain(w):
                     try:
                         child.configure(bg=original_bg)
                     except tk.TclError:
@@ -978,7 +1009,7 @@ class Panel:
         for w in self.rows_frame.pack_slaves():
             w.pack_forget()
         for w in cards:
-            w.pack(fill="x", pady=3)
+            w.pack(fill="x")
         new_order = [getattr(c, "_provider_name", "") for c in cards]
         # 占位行("未配置任何 provider")也挂在 rows_frame 下且带
         # _provider_name,不按真实结果过滤会把占位文本存进 order
@@ -1031,6 +1062,13 @@ class Panel:
                 self.root.after_cancel(aid)
             except tk.TclError:
                 pass
+        unbind = getattr(self, "_unbind_wheel", None)
+        if unbind is not None:
+            try:
+                unbind()
+            except tk.TclError:
+                pass
+            self._unbind_wheel = None
 
     def _update(self):
         results = list(self.state.results or [])
@@ -1093,9 +1131,8 @@ class Panel:
         # _tick 永远跑 33ms 快档
         self._anim_rows = set()
         if not results:
-            box = self._row_skeleton("未配置任何 provider", "右键 + 添加 Key",
-                                      {"unit": ""})
-            box["value"].config(text="-", fg=C["off"])
+            self._build_empty_state()
+            tag_subtree(self.rows_frame, wheel_tag(self.rows_frame))
             return
         order = []
         get_order = self.actions.get("get_order")
@@ -1106,27 +1143,52 @@ class Panel:
         ordered += [r for r in results if r["name"] not in order]
         for r in ordered:
             self._rows[r["name"]] = self._row_skeleton(r["name"], "", r)
+        # 新行的 bindtags 里没有滚轮 tag,不补标就悬停在新行上滚不动
+        tag_subtree(self.rows_frame, wheel_tag(self.rows_frame))
+
+    def _build_empty_state(self):
+        """空态:居中的一句主文案 + 一句副文案 + 一个可点的添加入口。
+
+        原来空列表是拿 _row_skeleton 造一条名叫「未配置任何 provider」、
+        值是 "-"、下面还挂一根空胶囊的假数据行。它看起来就是一条普通
+        provider,用户既不知道这是空态,也不知道下一步该点哪里——
+        而且它带 _provider_name,拖拽排序时得靠 known 过滤兜底。
+        空态不是数据,不该占用数据行的骨架。
+        """
+        bg = C["bg"]
+        box = tk.Frame(self.rows_frame, bg=bg)
+        box.pack(fill="both", expand=True, pady=Layout.PAD * 2)
+        tk.Label(box, text="还没有添加任何 API Key",
+                 font=(FONT, Typography.BODY_SIZE, "bold"),
+                 fg=C["text"], bg=bg).pack(pady=(0, 4))
+        tk.Label(box, text="添加后即可查看额度、重置时间与模型列表",
+                 font=(FONT, Typography.DETAIL_SIZE),
+                 fg=C["dim"], bg=bg).pack()
+        add = FlatButton(box, variant="solid", text="添加 API Key",
+                         on_click=lambda: self.actions.get("add_key", lambda: None)())
+        add.pack(pady=(Layout.PAD, 0))
+        self._empty_state = box
 
     def _row_skeleton(self, name, detail, result=None):
         result = result or {}
         bg = _row_bg(result)
         is_amount = _is_amount_mode(result)
         card = tk.Frame(self.rows_frame, bg=bg, cursor="hand2")
-        card.pack(fill="x", pady=3)
+        card.pack(fill="x")
         card._provider_name = name
         card._bg = bg
         top = tk.Frame(card, bg=bg)
-        top.pack(fill="x", padx=8, pady=(6, 0))
-        name_lbl = tk.Label(top, text=name, font=(FONT, 9, "bold"),
+        top.pack(fill="x", padx=Layout.PAD_X, pady=(Layout.ROW_PAD_Y, 0))
+        name_lbl = tk.Label(top, text=name, font=(FONT, Typography.BODY_SIZE, "bold"),
                             fg=C["text"], bg=bg)
         name_lbl.pack(side="left")
-        value_lbl = tk.Label(top, text="…", font=(FONT, 9),
+        value_lbl = tk.Label(top, text="…", font=(FONT, Typography.BODY_SIZE),
                              fg=C["dim"], bg=bg, cursor="hand2")
         value_lbl.pack(side="right")
-        det_lbl = tk.Text(card, font=(FONT, 9), fg=C["dim"], bg=bg,
+        det_lbl = tk.Text(card, font=(FONT, Typography.DETAIL_SIZE), fg=C["dim"], bg=bg,
                           wrap="word", height=1, bd=0, highlightthickness=0,
-                          padx=0, pady=2, cursor="arrow", takefocus=0)
-        det_lbl.pack(fill="x", padx=8)
+                          padx=0, pady=1, cursor="arrow", takefocus=0)
+        det_lbl.pack(fill="x", padx=Layout.PAD_X)
         det_lbl.tag_config("dim", foreground=C["dim"])
         det_lbl.tag_config("highlight", foreground=C["dim"])
         det_lbl.tag_raise("sel", "dim")
@@ -1138,11 +1200,13 @@ class Panel:
         if not is_amount:
             bar = tk.Canvas(card, height=Layout.ROW_BAR_HEIGHT, bg=bg,
                             highlightthickness=0, bd=0)
-            bar.pack(fill="x", padx=8, pady=(4, 7))
-            poly_kw = {"outline": "", "width": 0, "smooth": True,
-                       "splinesteps": 12, "state": "hidden"}
-            track = bar.create_polygon(0, 0, 0, 0, **poly_kw)
-            rect = bar.create_polygon(0, 0, 0, 0, **poly_kw)
+            bar.pack(fill="x", padx=Layout.PAD_X,
+                     pady=(4, Layout.ROW_PAD_Y))
+            track, rect = capsule_items(bar, height=Layout.ROW_BAR_HEIGHT)
+
+        # 行尾 1px 分割线:行与行之间靠它分隔,不再每行铺一个色块。
+        # 最后一行也画,否则列表底边是齐的、顶边多一道线,视觉上像缺一行。
+        hairline(card).pack(side="bottom", fill="x")
 
         widgets = {"frame": card, "name": name_lbl, "value": value_lbl,
                    "detail": det_lbl, "bar": bar, "rect": rect,
@@ -1156,25 +1220,24 @@ class Panel:
                 add="+",
             )
 
-        for w in (card, top, name_lbl):
-            w.bind("<Enter>", lambda e, ww=card: ww.config(bg=C["card_hover"]))
-            w.bind("<Leave>", lambda e, ww=card: ww.config(bg=ww._bg))
+        # hover / press 绑整链而不是只绑 card:之前只绑了 card/top/name_lbl
+        # 且只改 card 的底色,鼠标停在 detail 或进度条上零响应,停在 name 上时
+        # 卡片外圈变亮而内部子 Frame 仍是原色,看起来是一圈亮边而不是整块亮起。
+        # 底色传零参可调用对象,主题切换后 C 被原地改写也能取到新值。
+        hover_chain = [card, top, name_lbl, det_lbl, bar, value_lbl]
+        card._row_chain = hover_chain
+        bind_hover_bg(hover_chain, lambda: C["card_hover"], lambda: card._bg)
+        bind_press_bg(hover_chain, lambda: C["card_pressed"], lambda: card._bg)
         # 悬停只改卡片底色,不改数值前景色:数值颜色是等级语义(红/黄/绿),
         # 之前 <Leave> 把它写死成 dim,而 _paint_row 按签名去重不会再上色,
         # 于是鼠标划过一次,critical/warn 行就永久变灰。
         value_lbl.bind("<Enter>", lambda e, n=name: self._flash_value(n))
         value_lbl.bind("<Leave>", lambda e, n=name: self._unflash_value(n))
 
-
-        for w in (card, top, name_lbl, det_lbl, bar, value_lbl):
+        for w in hover_chain:
             if w is None:      # 金额行没有 bar
                 continue
             w.bind("<Button-3>", lambda e, n=name: self._popup_row_menu(e, n))
-            # 按下态:点击时卡片压暗一档,松开恢复,给"按到了"的反馈
-            w.bind("<ButtonPress-1>",
-                   lambda e, ww=card: self._card_press(ww), add="+")
-            w.bind("<ButtonRelease-1>",
-                   lambda e, ww=card: self._card_release(ww), add="+")
 
         # tooltip:估算值说明 + 完整 detail(detail Text 只有 1 行高,
         # 长文案平时是被裁掉的,悬浮看全文)
@@ -1194,8 +1257,7 @@ class Panel:
 
         _attach_tip(card, _tip_text)
 
-        drag_widgets = [w for w in (card, top, name_lbl, det_lbl, bar,
-                                    value_lbl) if w is not None]
+        drag_widgets = [w for w in hover_chain if w is not None]
         for w in drag_widgets:
             w.bind("<Button-1>", lambda e, n=name: self._drag_press(e, n), add="+")
             w.bind("<B1-Motion>", lambda e, n=name: self._drag_motion(e, n), add="+")
@@ -1214,18 +1276,6 @@ class Panel:
                     self.root.clipboard_append(text)
                     self._flash_copied(name)
                 return
-
-    def _card_press(self, card):
-        try:
-            card.configure(bg=C["card_pressed"])
-        except tk.TclError:
-            pass
-
-    def _card_release(self, card):
-        try:
-            card.configure(bg=getattr(card, "_bg", C["card"]))
-        except tk.TclError:
-            pass
 
     def _flash_copied(self, name, which="value"):
         """复制成功后把该行标签短暂染成 ok 绿,给个可见反馈。
