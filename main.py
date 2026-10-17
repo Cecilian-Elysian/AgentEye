@@ -246,6 +246,27 @@ def build_actions(root, cfg, state, stop, wake, poller=None):
         ui["pinned"] = bool(pinned)
         _save()
 
+    def toggle_pin():
+        """置顶开关。
+
+        入口原来只挂在 ui/panel.py 的 header 按钮上,而 mac 模式下
+        header 整块被 MacHeader 接管、那个按钮根本不存在——置顶在生产
+        里不可达(能改的只有配置文件)。这里收到主窗口层,
+        右键菜单项与任何上层调用都走它。
+        """
+        ui = cfg.setdefault("ui", {})
+        pinned = not bool(ui.get("pinned", True))
+        ui["pinned"] = pinned
+        try:
+            root.attributes("-topmost", pinned)
+        except Exception:
+            pass
+        _save()
+        return pinned
+
+    def is_pinned():
+        return bool((cfg.get("ui") or {}).get("pinned", True))
+
     def save_ui(new_cfg=None):
         # MacWindow._persist_mode 会带一个 cfg 快照进来;真正的 cfg 已被
         # 它就地改过(同一个对象),所以这里只落盘,不合并。
@@ -480,6 +501,8 @@ def build_actions(root, cfg, state, stop, wake, poller=None):
         "save_size": save_size,
         "save_order": save_order,
         "save_pin": save_pin,
+        "toggle_pin": toggle_pin,
+        "is_pinned": is_pinned,
         "save_ui": save_ui,
         "save_theme": save_theme,
         "get_order": get_order,

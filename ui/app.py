@@ -16,10 +16,11 @@
 
 import tkinter as tk
 
-from ui.theme import (PALETTE, Layout, set_theme, current_choice,
+from ui.theme import (PALETTE, Layout, Typography, set_theme, current_choice,
                       bind_theme_listener, to_tk_color, to_tk_color_blended,
                       blend)
-from ui.fonts import fonts
+from ui.fonts import fonts, apply_default_font
+from ui.paint import apply_icon, bind_hover_bg
 from ui.vibrancy import apply_window_chrome
 from ui.screen import work_area, snap_clamp, restore_position
 
@@ -27,12 +28,21 @@ from ui.screen import work_area, snap_clamp, restore_position
 MODE_STANDARD = "standard"
 MODE_ESSENTIAL = "essential"
 
-# 右下角缩放热区边长(与 ui.panel 的 grip 视觉一致)
-RESIZE_GRIP = 16
-
 
 class TrafficLight(tk.Canvas):
-    """macOS 风格的圆点按钮。hover 提亮 30%,鼠标变手型表示可点击。"""
+    """macOS 风格的圆点按钮。
+
+    三态:静止 / hover 提亮 / 按下沉一档。之前只有两态——按下去和
+    悬停着长得一模一样,点错点和点对了看不出区别。
+    hover 色走色板 token,不再写死 blend(color, "#FFFFFF", 0.3):
+    浅色主题下往白里提 30% 会让红点变成粉色。
+    """
+
+    DOT_COLORS = {
+        "close": "TRAFFIC_RED",
+        "minimize": "TRAFFIC_YELLOW",
+        "settings": "TRAFFIC_GREEN",
+    }
 
     def __init__(self, parent, kind, color, command, size=None):
         size = size or Layout.TRAFFIC_DOT
@@ -40,8 +50,9 @@ class TrafficLight(tk.Canvas):
             parent,
             width=size, height=size,
             highlightthickness=0, bd=0,
-            bg=PALETTE.BG,
+            bg=to_tk_color(PALETTE.BG),
             cursor="hand2",
+            takefocus=0,
         )
         self._size = size
         self._kind = kind
@@ -50,27 +61,45 @@ class TrafficLight(tk.Canvas):
         self._is_header_dot = True
         self._dot = self.create_oval(1, 1, size - 1, size - 1,
                                      fill=color, outline="")
-        self.bind("<Button-1>", self._on_click)
+        self.bind("<Button-1>", self._on_click, add="+")
         self.bind("<Enter>", self._on_enter, add="+")
         self.bind("<Leave>", self._on_leave, add="+")
+        self.bind("<ButtonPress-1>", self._on_press, add="+")
+        self.bind("<ButtonRelease-1>", self._on_release, add="+")
+
+    def _base_color(self):
+        return getattr(PALETTE, self.DOT_COLORS.get(self._kind, ""),
+                       self._color)
 
     def _hover_fill(self):
         try:
-            return blend(self._color, "#FFFFFF", 0.3)
+            return blend(self._base_color(), "#FFFFFF", 0.25)
         except Exception:
-            return self._color
+            return self._base_color()
+
+    def _press_fill(self):
+        try:
+            return blend(self._base_color(), "#000000", 0.15)
+        except Exception:
+            return self._base_color()
+
+    def _set_fill(self, color):
+        try:
+            self.itemconfig(self._dot, fill=color)
+        except tk.TclError:
+            pass
 
     def _on_enter(self, _e=None):
-        try:
-            self.itemconfig(self._dot, fill=self._hover_fill())
-        except tk.TclError:
-            pass
+        self._set_fill(self._hover_fill())
 
     def _on_leave(self, _e=None):
-        try:
-            self.itemconfig(self._dot, fill=self._color)
-        except tk.TclError:
-            pass
+        self._set_fill(self._base_color())
+
+    def _on_press(self, _e=None):
+        self._set_fill(self._press_fill())
+
+    def _on_release(self, _e=None):
+        self._set_fill(self._hover_fill())
 
     def _on_click(self, _e=None):
         if self._command:
@@ -91,10 +120,7 @@ class TrafficLight(tk.Canvas):
             self.configure(bg=to_tk_color(palette.BG))
         except tk.TclError:
             pass
-        try:
-            self.itemconfig(self._dot, fill=self._color)
-        except tk.TclError:
-            pass
+        self._set_fill(self._color)
 
 
 class MacHeader(tk.Frame):
@@ -183,15 +209,27 @@ class MacWindow:
             self._mode = MODE_STANDARD
 
         self.fonts_dict = fonts(root)
+        # Tk 的全局默认字体:tk.Menu 与 messagebox 走 TkDefaultFont /
+        # TkMenuFont,不给就落到 Tk 自带的 Segoe UI 9pt,同一屏第四套字体。
+        apply_default_font(root, family=self.fonts_dict["ui"])
 
         root.title("AgentEye")
         root.overrideredirect(True)
         root.attributes("-topmost", self._pinned)
-        root.configure(bg=PALETTE.BG)
+        root.configure(bg=to_tk_color(PALETTE.BG))
+        apply_icon(root)
         self._apply_chrome()
 
-        self.outer = tk.Frame(root, bg=PALETTE.BG)
-        self.outer.pack(fill="both", expand=True)
+        # 1px 内边框。overrideredirect 窗口没有系统边框也没有 DWM 投影,
+        # 窗口边界在深色桌面上几乎看不出来——用一圈 DIVIDER 勾出轮廓,
+        # 比加阴影(要另开一层窗口)稳定得多。
+        self.border = tk.Frame(root, bg=to_tk_color_blended(PALETTE.DIVIDER),
+                               highlightthickness=0, bd=0)
+        self.border.pack(fill="both", expand=True)
+
+        self.outer = tk.Frame(self.border, bg=to_tk_color(PALETTE.BG))
+        self.outer.pack(fill="both", expand=True,
+                        padx=1, pady=1)
 
         self.header = MacHeader(
             self.outer, "AgentEye", self._safe_actions(),
@@ -225,6 +263,7 @@ class MacWindow:
         try:
             bg = to_tk_color(palette.BG)
             self.root.configure(bg=bg)
+            self.border.configure(bg=to_tk_color_blended(palette.DIVIDER))
             self.outer.configure(bg=bg)
             self.body.configure(bg=bg)
             self.standard_slot.configure(bg=bg)
@@ -292,12 +331,11 @@ class MacWindow:
             self._grip.place(relx=1.0, rely=1.0, anchor="se", x=-1, y=-1)
         except (tk.TclError, AttributeError):
             pass
-        if self.standard_attached is not None:
-            inner = self._view_root(self.standard_attached)
-            try:
-                inner.pack(fill="both", expand=True)
-            except tk.TclError:
-                pass
+        # 摆的是 slot 本身,不是视图根:Panel 的 root 恰好就是
+        # standard_slot(两者等价),但 EssentialBar.frame 是 essential_slot
+        # 的**子控件**——把它 pack 进一个没被 pack 的 slot,bar 有
+        # winfo_manager == "pack" 却永远不 mapped,折叠模式整个是空白窗口。
+        self.standard_slot.pack(fill="both", expand=True)
 
     def _show_essential(self):
         # essential 尺寸固定(minsize==maxsize),缩放热区没有意义,隐藏
@@ -306,24 +344,15 @@ class MacWindow:
         except (tk.TclError, AttributeError):
             pass
         try:
-            if self.standard_attached is not None:
-                inner = self._view_root(self.standard_attached)
-                try:
-                    inner.pack_forget()
-                except tk.TclError:
-                    pass
+            self.standard_slot.pack_forget()
         except tk.TclError:
             pass
-        if self.essential_attached is not None:
-            inner = self._view_root(self.essential_attached)
-            try:
-                inner.pack(fill="both", expand=True)
-            except tk.TclError:
-                pass
+        # 同 _show_standard:pack slot,不要 pack bar.frame
+        self.essential_slot.pack(fill="both", expand=True)
 
     @staticmethod
     def _view_root(view):
-        """取得视图的最外层 Frame。
+        """取得视图最外层的 widget(调试/测试用,切模式不靠它)。
 
         Panel 的最外层是 ``self.root``(在 mac 模式下是被传入的 Frame);
         EssentialBar 的最外层是 ``self.frame``。
@@ -450,7 +479,7 @@ class MacWindow:
         """
         grip = tk.Frame(self.outer, bg=to_tk_color(PALETTE.BG),
                         cursor="size_nw_se",
-                        width=RESIZE_GRIP, height=RESIZE_GRIP,
+                        width=Layout.RESIZE_GRIP, height=Layout.RESIZE_GRIP,
                         bd=0, highlightthickness=0)
         grip.place(relx=1.0, rely=1.0, anchor="se", x=-1, y=-1)
         dim = to_tk_color_blended(PALETTE.TEXT_DIM)
@@ -458,7 +487,8 @@ class MacWindow:
         for i in range(3):
             r = tk.Frame(grip, bg=dim, width=2, height=2,
                          bd=0, highlightthickness=0)
-            r.place(x=RESIZE_GRIP - 2 - i * 4, y=RESIZE_GRIP - 2 - i * 4)
+            r.place(x=Layout.RESIZE_GRIP - 2 - i * 4,
+                    y=Layout.RESIZE_GRIP - 2 - i * 4)
             dots.append(r)
         grip.bind("<Button-1>", self._grip_start)
         grip.bind("<B1-Motion>", self._grip_move)
