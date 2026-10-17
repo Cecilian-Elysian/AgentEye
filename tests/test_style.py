@@ -3,6 +3,8 @@
 - 运行时源码(ui / providers / 顶层模块)不得含 emoji
 - 测试源码同样扫描,只对 Unicode 测试样本开白名单
 - 箭头(→ ←)、≈、✓ ✗ 等排版与文本符号不算 emoji
+- 任何源码都不得含 U+FFFD:它是被写坏的 UTF-8 留下的替换字符,
+  往往是 GBK/UTF-8 误解码后又被存回去的产物
 """
 import os
 import re
@@ -28,6 +30,12 @@ EMOJI = re.compile("[" + "".join(
 # 允许含 emoji 的文件:DPAPI 测试需要拿 emoji 当 Unicode 往返样本
 EMOJI_SAMPLE_FILES = frozenset({"tests/test_secure.py"})
 
+# U+FFFD REPLACEMENT CHARACTER。源码里出现它 = 某个 CJK 字符的字节
+# 在某次编辑/转码中被破坏后又存了回去。注释里的中文尤其高发:
+# 它不影响运行、不抛异常,却让后续维护者照着一句缺字的注释理解语义。
+# 同样用码点构造,本文件自身才能通过下面这条扫描。
+REPLACEMENT_CHAR = chr(0xFFFD)
+
 RUNTIME_SOURCES = [
     "main.py", "config.py", "cache.py", "notify.py", "secure.py",
     "providers/__init__.py", "providers/detect.py", "providers/generic.py",
@@ -38,7 +46,7 @@ RUNTIME_SOURCES = [
     "ui/model_panel.py", "ui/row_menu.py", "ui/settings_dialog.py",
     "ui/add_key.py", "ui/confirm_delete.py", "ui/mac_toplevel.py",
     "ui/theme.py", "ui/fonts.py", "ui/scrollbar_style.py",
-    "ui/vibrancy.py",
+    "ui/vibrancy.py", "ui/paint.py",
 ]
 
 FORBIDDEN_IMPORTS = ("pywin32", "win32api", "win32gui", "pyautogui",
@@ -108,6 +116,65 @@ class TestNoEmoji(unittest.TestCase):
         with open(path, encoding="utf-8") as fh:
             src = fh.read()
         self.assertIn('prefix = "≈" if result.get("is_estimate")', src)
+
+
+def _scan_replacement_chars(rel_paths):
+    """返回 [(abs_path, lineno), ...]:含 U+FFFD 的源码位置。"""
+    offenders = []
+    for rel in rel_paths:
+        path = rel if os.path.isabs(rel) else os.path.join(ROOT, rel)
+        if not os.path.isfile(path):
+            continue
+        with open(path, encoding="utf-8") as fh:
+            for i, line in enumerate(fh, 1):
+                if REPLACEMENT_CHAR in line:
+                    offenders.append((path, i))
+    return offenders
+
+
+class TestNoCorruptedChars(unittest.TestCase):
+    """源码不得含 U+FFFD(见 REPLACEMENT_CHAR)。"""
+
+    def _scanned(self):
+        rels = list(RUNTIME_SOURCES)
+        tests_dir = os.path.join(ROOT, "tests")
+        rels += [f"tests/{n}" for n in sorted(os.listdir(tests_dir))
+                 if n.startswith("test_") and n.endswith(".py")]
+        return rels
+
+    def test_sources_are_valid_utf8(self):
+        """先确认文件本身是合法 UTF-8:坏字节连行号都定位不出来。"""
+        bad = []
+        for rel in self._scanned():
+            path = os.path.join(ROOT, rel)
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, "rb") as fh:
+                    fh.read().decode("utf-8")
+            except UnicodeDecodeError as e:
+                bad.append(f"{rel} ({e.reason})")
+        self.assertEqual(bad, [], "源码必须是合法 UTF-8")
+
+    def test_no_replacement_char_in_sources(self):
+        self.assertEqual(
+            _scan_replacement_chars(self._scanned()), [],
+            "源码里出现 U+FFFD:有中文字符的字节被写坏了"
+            "(常见于 GBK/UTF-8 误解码后又存回),请修正对应字符")
+
+    def test_scanner_detects_a_real_corrupt_file(self):
+        """扫描器不能是永远返回空的空壳:用临时坏文件自证。"""
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            good = os.path.join(d, "good.py")
+            bad = os.path.join(d, "bad.py")
+            with open(good, "w", encoding="utf-8") as fh:
+                fh.write("x = 1  # 阈值解析\n")
+            # 模拟"GBK 被当 UTF-8 读、又存回去"的真实后果:
+            # 合法字节序列被换成了两个 U+FFFD
+            with open(bad, "w", encoding="utf-8") as fh:
+                fh.write("x = 1  # " + REPLACEMENT_CHAR * 2 + "解析\n")
+            self.assertEqual(_scan_replacement_chars([good, bad]), [(bad, 1)])
 
 
 class TestMinimalDependencies(unittest.TestCase):

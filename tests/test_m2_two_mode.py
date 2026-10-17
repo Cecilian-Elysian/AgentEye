@@ -231,11 +231,39 @@ class TestEssentialBarWidget(unittest.TestCase):
     def test_create_empty(self):
         from ui.essential_bar import EssentialBar
         from ui.fonts import fonts
+        from ui.theme import Layout
         state = _MockState()
         bar = EssentialBar(tk.Frame(self.root), state, {}, fonts(self.root),
                            on_expand=lambda: None)
-        self.assertEqual(str(bar.frame.cget("width")), "240")
-        self.assertEqual(str(bar.frame.cget("height")), "56")
+        # 尺寸取 Layout 常量,不钉死字面量:折叠条带的高度要装得下
+        # "20pt 大数字 + 一条胶囊",这两个数之间有硬约束,钉死一个
+        # 就挡住了另一个的调整。
+        self.assertEqual(str(bar.frame.cget("width")),
+                         str(Layout.ESSENTIAL_W))
+        self.assertEqual(str(bar.frame.cget("height")),
+                         str(Layout.ESSENTIAL_H))
+
+    def test_bar_fits_inside_its_own_height(self):
+        """条带必须装得下:大数字行 + 胶囊条不能被 64px 挤出可视区。
+
+        之前 ESSENTIAL_H=56 而数字用 20pt(YaHei UI 行高约 41px),
+        加上留白后胶囊条整条落在可视区外——折叠态只剩一行字。
+        """
+        from ui.essential_bar import EssentialBar
+        from ui.fonts import fonts
+        from ui.theme import Layout
+        state = _MockState()
+        holder = tk.Frame(self.root)
+        holder.pack()
+        bar = EssentialBar(holder, state, {}, fonts(self.root),
+                           on_expand=lambda: None)
+        self.root.update_idletasks()
+        holder_frame = bar.countdown_lbl.master
+        bottom = (holder_frame.winfo_y() + holder_frame.winfo_height())
+        self.assertLessEqual(
+            bottom, bar.frame.winfo_height(),
+            "胶囊条超出条带高度,折叠模式下它不会被看到")
+        self.assertEqual(Layout.ESSENTIAL_W, 240)
 
     def test_click_calls_on_expand(self):
         from ui.essential_bar import EssentialBar

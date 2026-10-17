@@ -33,6 +33,28 @@ def _set_dpi_awareness():
         pass
 
 
+def _walk(widget):
+    """深度遍历一棵 widget 树。"""
+    out = [widget]
+    for c in widget.winfo_children():
+        out.extend(_walk(c))
+    return out
+
+
+def _collect_label_texts(widget):
+    """收集子树里所有 Label / Button 上的文本。"""
+    texts = []
+    for w in _walk(widget):
+        if w.winfo_class() in ("Label", "Button"):
+            try:
+                t = str(w.cget("text"))
+            except tk.TclError:
+                continue
+            if t:
+                texts.append(t)
+    return texts
+
+
 class _MockState:
     """与 main.State 同形,供 Panel / EssentialBar 消费。"""
 
@@ -180,7 +202,12 @@ class TestM1Integration(IsolatedConfigMixin, unittest.TestCase):
         self.root.update_idletasks()
         self.assertTrue(panel.rows_frame.winfo_exists())
 
-    def test_empty_providers_shows_placeholder_row(self):
+    def test_empty_providers_shows_dedicated_empty_state(self):
+        """空列表渲染专用空态,不再伪造一条 provider 行。
+
+        旧实现拿 _row_skeleton 造一条名叫「未配置任何 provider」、值是
+        "-"、下面还挂一根空胶囊的行,看着就是一条真实 provider。
+        """
         from ui import Panel
         from ui.app import MacWindow
 
@@ -192,9 +219,18 @@ class TestM1Integration(IsolatedConfigMixin, unittest.TestCase):
         mac.attach_standard(panel)
         mac.show_initial_mode()
         self.root.update_idletasks()
+        self.assertEqual(panel._rows, {}, "空列表不该留下任何 provider 行")
         names = [getattr(w, "_provider_name", None)
                  for w in panel.rows_frame.winfo_children()]
-        self.assertIn("未配置任何 provider", names)
+        self.assertNotIn("未配置任何 provider", names,
+                         "空态不该伪装成一条 provider 行")
+        texts = _collect_label_texts(panel.rows_frame)
+        self.assertTrue(any("还没有添加任何 API Key" in t for t in texts),
+                        f"空态主文案缺失,实际渲染: {texts}")
+        # 空态必须给出下一步,而不是只说一句"空空如也"
+        self.assertTrue(
+            any(w.winfo_class() == "Button" for w in _walk(panel.rows_frame)),
+            "空态应有一个可点的「添加 API Key」入口")
 
     def test_chrome_flags_applied(self):
         from ui import Panel
@@ -274,11 +310,19 @@ class TestM2TwoModeIntegration(IsolatedConfigMixin, unittest.TestCase):
         self.assertEqual(mac.mode, "standard")
 
     def test_essential_slot_hidden_in_standard_mode(self):
+        """标准模式:standard_slot 在树上,essential_slot 不在。
+
+        条带 bar.frame 一直 pack 在 essential_slot 里(由构造期完成),
+        显隐由 slot 决定——所以判据看 slot,不看视图根。
+        """
         mac, panel, bar = self._wire()
         mac.show_initial_mode()
         self.root.update_idletasks()
-        self.assertEqual(mac._view_root(bar).winfo_manager(), "")
+        self.assertEqual(mac.essential_slot.winfo_manager(), "")
+        self.assertEqual(mac.standard_slot.winfo_manager(), "pack")
         self.assertEqual(mac._view_root(panel).winfo_manager(), "pack")
+        self.assertEqual(bar.frame.winfo_height(), 1,
+                         "essential_slot 不在树上时条带不参与布局")
 
     def test_essential_slot_shown_in_essential_mode(self):
         mac, panel, bar = self._wire()
@@ -286,8 +330,40 @@ class TestM2TwoModeIntegration(IsolatedConfigMixin, unittest.TestCase):
         self.root.update_idletasks()
         mac.toggle_mode()
         self.root.update_idletasks()
-        self.assertEqual(mac._view_root(bar).winfo_manager(), "pack")
-        self.assertEqual(mac._view_root(panel).winfo_manager(), "")
+        self.root.update()
+        self.assertEqual(mac.essential_slot.winfo_manager(), "pack")
+        self.assertEqual(mac.standard_slot.winfo_manager(), "")
+
+    def test_essential_bar_is_actually_visible(self):
+        """折叠模式必须真的把条带显示出来。
+
+        历史 bug:切模式时 pack 的是 EssentialBar.frame,而它的父容器
+        essential_slot 没被 pack —— bar 有 winfo_manager == "pack" 却
+        永远不 mapped,折叠模式是个纯空白窗口。原来那条测试只查
+        winfo_manager,把"packed 到不可见"当成了可见。
+
+        判据是结构性的「slot 在树上 + 条带 pack 在这个 slot 里」;
+        这里不断言 winfo_width —— 测试的 root 是 withdraw 的,
+        整棵树都不会参与几何计算,winfo_width 恒为 1。
+        """
+        mac, panel, bar = self._wire()
+        mac.show_initial_mode()
+        self.root.update_idletasks()
+        mac.toggle_mode()
+        self.root.update_idletasks()
+
+        self.assertEqual(mac.essential_slot.winfo_manager(), "pack",
+                         "essential_slot 必须被 pack,否则子控件全是死区")
+        self.assertIs(bar.frame.master, mac.essential_slot)
+        self.assertEqual(bar.frame.winfo_manager(), "pack",
+                         "条带必须 pack 在 essential_slot 里")
+        self.assertEqual(mac.standard_slot.winfo_manager(), "")
+        # 尺寸配置没被覆盖,且与 Layout 一致
+        from ui.theme import Layout
+        self.assertEqual(str(bar.frame.cget("width")),
+                         str(Layout.ESSENTIAL_W))
+        self.assertEqual(str(bar.frame.cget("height")),
+                         str(Layout.ESSENTIAL_H))
 
 
 if __name__ == "__main__":

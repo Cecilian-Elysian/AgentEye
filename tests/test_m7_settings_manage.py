@@ -152,7 +152,10 @@ class TestSettingsManageList(unittest.TestCase):
         self.assertIsNone(dlg._form)
         texts = _collect_texts(dlg._center)
         self.assertIn("共 0 个", texts)
-        self.assertTrue(any("暂无 provider" in t for t in texts))
+        self.assertTrue(any("还没有添加任何 API Key" in t for t in texts),
+                        f"空态主文案缺失,实际: {texts}")
+        self.assertTrue(any("添加后即可" in t for t in texts),
+                        "空态应说明添加后能做什么")
 
     def test_initial_view_add_key(self):
         from ui.add_key import AddKeyForm

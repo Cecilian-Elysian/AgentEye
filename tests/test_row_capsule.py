@@ -317,8 +317,10 @@ class ValueCopy(unittest.TestCase):
                          "level": "ok", "remaining": None, "used": None,
                          "total": None, "pct": 73, "detail": "d",
                          "error": None, "updated_at": 1.0})
-        # 剪贴板进程级共享:上个用例可能留了同样的内容,先清空
+        # 剪贴板进程级共享:上个用例可能留了同样的内容,clear 与系统剪贴板
+        # 的同步在 Windows 上有抖动,先写入哨兵值,点击后哨兵仍在即为通过
         p.root.clipboard_clear()
+        p.root.clipboard_append("sentinel")
         p.root.update()
         card = p._rows["Z"]["frame"]
         press = types.SimpleNamespace(widget=card, x_root=0, y_root=0)
@@ -329,8 +331,8 @@ class ValueCopy(unittest.TestCase):
             text = p.root.clipboard_get()
         except Exception:
             text = ""
-        self.assertNotEqual(text, "已用 27%",
-                            "点行卡片空白区不该触发复制")
+        self.assertEqual(text, "sentinel",
+                         "点行卡片空白区不该触发复制")
 
 
 class ThemeKeepsScroll(unittest.TestCase):

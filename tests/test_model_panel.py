@@ -97,13 +97,22 @@ class EmptyFilterRender(unittest.TestCase):
     def tearDownClass(cls):
         cls._root.destroy()
 
-    def test_no_match_renders_placeholder(self):
+    def test_no_match_renders_empty_state(self):
+        """无匹配时渲染专用空态(主文案 + 一句下一步),不是一行「(无匹配)」。"""
         p = mp.ModelPanel(self._root, "Test", ["m1", "m2"])
         p.search_var.set("zzz-no-match")
         labels = [w for w in p.inner.winfo_children()
                   if isinstance(w, tk.Label)]
-        self.assertEqual(len(labels), 1)
-        self.assertEqual(labels[0].cget("text"), "(无匹配)")
+        self.assertEqual(len(labels), 0,
+                         "空态包在自己的容器里,不该在 inner 顶层留裸 Label")
+        box = p.inner.winfo_children()
+        self.assertEqual(len(box), 1)
+        texts = [str(w.cget("text")) for w in box[0].winfo_children()
+                 if isinstance(w, tk.Label)]
+        self.assertTrue(any("没有匹配的模型" in t for t in texts),
+                        f"空态主文案缺失,实际: {texts}")
+        self.assertTrue(any("换个关键词" in t for t in texts),
+                        "空态应说明下一步怎么做,而不是只说没有结果")
 
     def test_probe_result_targeted_per_model(self):
         p = mp.ModelPanel(self._root, "Test", ["m1", "m2"], on_probe=lambda m: (True, 5, ""))

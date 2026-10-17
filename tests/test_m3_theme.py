@@ -308,6 +308,12 @@ class TestPanelRefreshPalette(unittest.TestCase):
         set_theme("dark", broadcast=False, persist=False)
 
     def test_panel_refresh_palette_changes_row_bg(self):
+        """切主题后行底色必须跟到新主题的窗口底色。
+
+        行不再铺色块(极简工具风:层级靠 hairline + hover),所以行底色
+        应等于 PALETTE.BG。原来这里断言的是 LightPalette.CARD——那是
+        旧设计"每行一块底色",现在 CARD 只作输入框/菜单的填充面。
+        """
         from ui.panel import Panel
 
         class FakeState:
@@ -338,12 +344,22 @@ class TestPanelRefreshPalette(unittest.TestCase):
         set_theme("light", broadcast=False)
         panel.refresh_palette("light", PALETTES["light"], False)
 
-        bg_after = panel._rows.get("p1", {}).get("frame")
+        row = panel._rows.get("p1")
+        self.assertIsNotNone(row)
+        bg_after = row.get("frame")
         self.assertIsNotNone(bg_after)
         self.assertEqual(
             bg_after.cget("bg").lower(),
-            to_tk_color(LightPalette.CARD).lower(),
+            to_tk_color(LightPalette.BG).lower(),
         )
+        # 整链同步:子控件不能停在旧主题的底色上,否则就是"外亮内暗"的割裂环
+        for key in ("name", "value", "detail"):
+            w = row.get(key)
+            if w is None:
+                continue
+            self.assertEqual(w.cget("bg").lower(),
+                             to_tk_color(LightPalette.BG).lower(),
+                             f"{key} 子控件底色未跟随主题刷新")
 
 
 class TestMacWindowApplyTheme(unittest.TestCase):

@@ -176,7 +176,8 @@ class TestActionsSurface(unittest.TestCase):
         required = [
             "refresh_now", "toggle_pause", "test_notify", "open_config",
             "open_settings", "save_position", "save_size", "save_order",
-            "save_pin", "save_ui", "save_theme", "get_order",
+            "save_pin", "toggle_pin", "is_pinned",
+            "save_ui", "save_theme", "get_order",
             "save_model_order", "quit", "add_key", "edit_provider",
             "update_provider", "delete_provider", "delete_provider_by_id",
             "probe_model", "pause_provider", "probe_models",

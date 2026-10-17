@@ -3,7 +3,8 @@ import unittest
 import tkinter as tk
 
 from ui.theme import (
-    set_theme, current_palette, PALETTE, to_tk_color, to_tk_color_blended,
+    set_theme, current_palette, PALETTE, PALETTES, to_tk_color,
+    to_tk_color_blended,
 )
 from ui.app import MacWindow, TrafficLight
 from ui.essential_bar import EssentialBar
@@ -43,13 +44,25 @@ class TestLightThemeReadability(unittest.TestCase):
         return MacWindow(self.root, cfg, actions or {})
 
     def test_palette_accessors_track_set_theme(self):
-        """to_tk_color(PALETTE.TEXT) 必须在 set_theme 之后立即变化。"""
+        """to_tk_color(PALETTE.TEXT) 必须在 set_theme 之后立即变化。
+
+        断言跟色板常量比,而不是钉死某个 hex——极简风重做时调过 TEXT,
+        但"TEXT 在两套主题里必须不同"这条契约没变。
+        """
         import ui.theme as t
         try:
             t.set_theme("dark", broadcast=False)
-            self.assertEqual(t.to_tk_color(t.PALETTE.TEXT), "#FFFFFF")
+            dark = t.to_tk_color(t.PALETTE.TEXT)
+            self.assertEqual(dark, t.to_tk_color(t.DarkPalette.TEXT))
             t.set_theme("light", broadcast=False)
-            self.assertEqual(t.to_tk_color(t.PALETTE.TEXT), "#000000")
+            light = t.to_tk_color(t.PALETTE.TEXT)
+            self.assertEqual(light, t.to_tk_color(t.LightPalette.TEXT))
+            self.assertNotEqual(dark, light,
+                                "两套主题的主文字色必须不同,否则切主题看不出来")
+            # 浅色主题下主文字必须是深色,否则在近白底上不可读
+            r, g, b = _hex_to_rgb(light)
+            self.assertLess(max(r, g, b), 128,
+                            f"浅色主题主文字 {light} 不是深色")
         finally:
             t.set_theme("dark", broadcast=False, persist=False)
 
@@ -72,8 +85,13 @@ class TestLightThemeReadability(unittest.TestCase):
         mac = self._build_mac()
         mac.apply_theme("light", broadcast=True)
         title = mac.header.title_lbl
-        self.assertEqual(title.cget("fg").lower(), "#000000")
-        self.assertEqual(title.cget("bg").lower(), "#f5f5f7")
+        self.assertEqual(title.cget("fg").lower(),
+                         to_tk_color(PALETTES["light"].TEXT).lower())
+        self.assertEqual(title.cget("bg").lower(),
+                         to_tk_color(PALETTES["light"].BG).lower())
+        # 标题必须与 header 底色同底,否则浅色主题下是一块异色方框
+        self.assertEqual(title.cget("bg").lower(),
+                         mac.header.cget("bg").lower())
 
     def test_essential_bar_sub_label_contrasts_in_light(self):
         set_theme("dark", broadcast=False)
@@ -106,7 +124,8 @@ class TestLightThemeReadability(unittest.TestCase):
         original_fg = mac.header.title_lbl.cget("fg").lower()
         original_bg = mac.header.title_lbl.cget("bg").lower()
         mac.apply_theme("light", broadcast=True)
-        self.assertEqual(mac.header.title_lbl.cget("fg").lower(), "#000000")
+        self.assertEqual(mac.header.title_lbl.cget("fg").lower(),
+                         to_tk_color(PALETTES["light"].TEXT).lower())
         mac.apply_theme("dark", broadcast=True)
         self.assertEqual(mac.header.title_lbl.cget("fg").lower(), original_fg)
         self.assertEqual(mac.header.title_lbl.cget("bg").lower(), original_bg)
@@ -134,27 +153,47 @@ class TestTrafficLightThemeRefresh(unittest.TestCase):
         set_theme("dark", broadcast=False)
         mac = self._mac()
         mac.apply_theme("light", broadcast=True)
+        expected = to_tk_color(PALETTES["light"].BG).lower()
         for dot in (mac.header.yellow_dot, mac.header.settings_dot,
                     mac.header.red_dot):
             bg = dot.cget("bg").lower()
-            self.assertEqual(bg, "#f5f5f7",
-                             f"{dot._kind} 浅色下 Canvas bg 应 = #f5f5f7,实为 {bg}")
+            self.assertEqual(bg, expected,
+                             f"{dot._kind} 浅色下 Canvas bg 应 = {expected},实为 {bg}")
 
     def test_traffic_light_canvas_bg_round_trip(self):
         """dark→light→dark 来回切换,bg 必须正确回到 dark 值。"""
         set_theme("dark", broadcast=False)
         mac = self._mac()
+        dark_bg = to_tk_color(PALETTES["dark"].BG).lower()
+        light_bg = to_tk_color(PALETTES["light"].BG).lower()
+        self.assertNotEqual(dark_bg, light_bg,
+                            "两套主题的窗口底色必须不同,否则这条断言没有意义")
         for dot in (mac.header.yellow_dot, mac.header.settings_dot,
                     mac.header.red_dot):
-            self.assertEqual(dot.cget("bg").lower(), "#1e1e1e")
+            self.assertEqual(dot.cget("bg").lower(), dark_bg)
         mac.apply_theme("light", broadcast=True)
         for dot in (mac.header.yellow_dot, mac.header.settings_dot,
                     mac.header.red_dot):
-            self.assertEqual(dot.cget("bg").lower(), "#f5f5f7")
+            self.assertEqual(dot.cget("bg").lower(), light_bg)
         mac.apply_theme("dark", broadcast=True)
         for dot in (mac.header.yellow_dot, mac.header.settings_dot,
                     mac.header.red_dot):
-            self.assertEqual(dot.cget("bg").lower(), "#1e1e1e")
+            self.assertEqual(dot.cget("bg").lower(), dark_bg)
+
+    def test_traffic_light_has_press_state(self):
+        """交通灯必须有独立的按下态。
+
+        原来只有静止/hover 两态,点下去和悬停着长得一样,点错点看不出区别。
+        """
+        set_theme("dark", broadcast=False)
+        mac = self._mac()
+        dot = mac.header.red_dot
+        base = dot._base_color()
+        hover = dot._hover_fill()
+        press = dot._press_fill()
+        self.assertNotEqual(hover, base, "hover 必须比静止态亮")
+        self.assertNotEqual(press, base, "按下必须与静止态不同")
+        self.assertNotEqual(press, hover, "按下必须与 hover 不同")
 
     def test_traffic_light_constructs_with_header_dot_flag(self):
         """新 TrafficLight 必须设 _is_header_dot = True,防止点击触发 drag。"""

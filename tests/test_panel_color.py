@@ -173,8 +173,70 @@ class IsAmountMode(unittest.TestCase):
 
 
 class RowBg(unittest.TestCase):
-    def test_amount_warm_bg(self):
-        self.assertNotEqual(panel._row_bg({"unit": "$"}), panel._row_bg({"unit": "%"}))
+    """行底色 = 窗口底色,不再按金额/额度铺两种色块。
+
+    极简工具风的层级靠 1px 分割线和 hover 浮色,不靠每行一个色块。
+    金额行铺暖紫、额度行铺 CARD 的做法把列表切成两种颜色的横条,
+    而"这是金额还是百分比"该由数值文本和进度条承担。
+    """
+
+    def test_amount_row_matches_window_bg(self):
+        self.assertEqual(panel._row_bg({"unit": "$"}), panel.C["bg"])
+
+    def test_ratio_row_matches_window_bg(self):
+        self.assertEqual(panel._row_bg({"unit": "%"}), panel.C["bg"])
+
+    def test_both_kinds_share_one_bg(self):
+        self.assertEqual(panel._row_bg({"unit": "$"}),
+                         panel._row_bg({"unit": "%"}))
+
+
+class PaletteRamp(unittest.TestCase):
+    """灰阶必须是一条能分开的斜坡。
+
+    原先 CARD_HOVER / CARD_PRESSED / BAR_BG 三者是同一个 #3A3A3A,
+    结果是"悬停""进度轨道""按下"三者在深色下完全分不出来。
+    """
+
+    def _ramp(self):
+        return [panel.C["bg"], panel.C["card"], panel.C["card_hover"],
+                panel.C["card_pressed"], panel.C["bar_bg"]]
+
+    def test_no_two_adjacent_steps_share_a_color(self):
+        ramp = self._ramp()
+        for lo, hi in zip(ramp, ramp[1:]):
+            self.assertNotEqual(lo, hi,
+                                "相邻两档灰阶不能同色,否则状态分不出来")
+
+    def test_steps_are_monotonic_in_lightness(self):
+        """深色下逐档变亮,浅色下逐档变暗。
+
+        必须先调 _refresh_C:C 是 panel 的投影字典,set_theme 不会自动刷它
+        ——这正是 AGENTS.md 规则 3 那条坑,漏掉这步就是在拿深色值验浅色斜坡。
+        """
+        from ui.theme import set_theme, is_dark
+        for choice in ("dark", "light"):
+            set_theme(choice, broadcast=False)
+            panel._refresh_C()
+            try:
+                ramp = self._ramp()
+                deltas = [_lum(b) - _lum(a) for a, b in zip(ramp, ramp[1:])]
+                if is_dark():
+                    self.assertTrue(all(d > 0 for d in deltas),
+                                    f"深色灰阶应逐档变亮,实为 {deltas}")
+                else:
+                    self.assertTrue(all(d < 0 for d in deltas),
+                                    f"浅色灰阶应逐档变暗,实为 {deltas}")
+            finally:
+                set_theme("dark", broadcast=False, persist=False)
+                panel._refresh_C()
+
+
+def _lum(hex_color):
+    """感知亮度,用于比较两档灰的明暗次序。"""
+    h = hex_color.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
 if __name__ == "__main__":
