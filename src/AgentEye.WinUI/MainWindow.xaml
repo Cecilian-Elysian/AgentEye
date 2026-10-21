@@ -6,7 +6,7 @@
     Title="AgentEye">
 
     <Window.SystemBackdrop>
-        <MicaBackdrop Kind="Base" />
+        <DesktopAcrylicBackdrop />
     </Window.SystemBackdrop>
 
     <Grid x:Name="Root" Loaded="Root_Loaded">
@@ -14,6 +14,11 @@
             <RowDefinition Height="48" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
+
+        <!-- Acrylic 底层跟系统主题,这层罩保证手选浅/深时观感一致 -->
+        <Border Grid.RowSpan="2"
+                Background="{ThemeResource AeGlassTintBrush}"
+                IsHitTestVisible="False" />
 
         <!-- 自绘标题栏(延伸进标题栏区,拖拽区交给 SetTitleBar) -->
         <Grid x:Name="AppTitleBar" Background="Transparent">

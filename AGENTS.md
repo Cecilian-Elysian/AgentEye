@@ -42,7 +42,9 @@ dotnet test tests\AgentEye.Core.Tests -v q --nologo      # 56 passed
 ## XAML 契约
 
 - 属性值若以 `{` 开头(如字面 JSON)必须写成 `{}{...}` 转义,否则
-  XamlCompiler pass1 静默崩溃、无报错行号。
+  XamlCompiler pass1 静默崩溃、无报错行号。子元素排在属性元素
+  (如 `<Grid.RowDefinitions>`)**之前**同样触发 pass1 静默崩——
+  属性元素一律写在最前。
 - 头部图标按钮是 32×32、透明底、圆角 6 的 `Button` + `FontIcon`;
   按钮区右侧留白 = `AppWindow.TitleBar.RightInset / RasterizationScale`
   (物理像素换算 DIP),别硬编码。
