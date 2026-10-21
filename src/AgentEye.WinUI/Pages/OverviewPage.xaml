@@ -3,30 +3,37 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <Grid Padding="24,16,24,16" RowSpacing="12">
+    <Grid Padding="20,12,20,12" RowSpacing="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- 标题行 + 操作 -->
-        <Grid Grid.Row="0">
-            <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-                <TextBlock Text="总览" FontSize="24" FontWeight="SemiBold" />
-                <TextBlock x:Name="StatusText" VerticalAlignment="Center" Opacity="0.7"
-                           Text="尚未刷新" />
-            </StackPanel>
-            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
-                <Button x:Name="BtnTogglePause" Content="暂停轮询" Click="BtnTogglePause_Click" />
-                <Button x:Name="BtnRefresh" Content="立即刷新" Click="BtnRefresh_Click" />
+        <TextBlock Grid.Row="0" Text="总览" FontSize="20" FontWeight="SemiBold" />
+
+        <Grid Grid.Row="1">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="RowsHost" Spacing="10" />
+            </ScrollViewer>
+
+            <!-- 空态(暂停/刷新入口在窗口头部图标,这里只引导去设置) -->
+            <StackPanel x:Name="EmptyState" Spacing="10"
+                        VerticalAlignment="Center" HorizontalAlignment="Center"
+                        Visibility="Collapsed">
+                <TextBlock Text="尚未配置 provider" Foreground="{ThemeResource AeTextSecondaryBrush}" />
+                <Button Content="打开设置" Click="OpenSettings_Click" />
             </StackPanel>
         </Grid>
 
-        <!-- 行列表 -->
-        <Grid Grid.Row="1">
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <StackPanel x:Name="RowsHost" Spacing="8" />
-            </ScrollViewer>
+        <!-- 页脚:刷新时间 + 数量 -->
+        <Grid Grid.Row="2">
+            <TextBlock x:Name="FooterUpdated" FontSize="11"
+                       Foreground="{ThemeResource AeTextSecondaryBrush}"
+                       Text="尚未刷新" />
+            <TextBlock x:Name="FooterCount" FontSize="11"
+                       Foreground="{ThemeResource AeTextSecondaryBrush}"
+                       HorizontalAlignment="Right" />
         </Grid>
     </Grid>
 </UserControl>

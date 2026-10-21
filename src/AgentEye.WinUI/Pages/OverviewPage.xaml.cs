@@ -8,8 +8,9 @@ using Microsoft.UI.Xaml.Shapes;
 namespace AgentEye.WinUI.Pages;
 
 /// <summary>
-/// 总览页:KPI 卡 + provider 行卡片(代码渲染,行随刷新整批重建,
-/// 对齐 Python 版 Panel 的重建语义)。
+/// 总览页:provider 行扁平化直排在玻璃上(36px kind 图标 + 名称/主值 +
+/// 3px 等级色细条 + 1px 分割线),行随刷新整批重建,
+/// 对齐 Python 版 Panel 的重建语义。
 /// </summary>
 public sealed partial class OverviewPage : UserControl
 {
@@ -37,13 +38,23 @@ public sealed partial class OverviewPage : UserControl
     private void OnResultsChanged()
     {
         var rows = _app.Results;
-        StatusText.Text = _app.Poller.LastRefresh is { } t
+        FooterUpdated.Text = _app.Poller.LastRefresh is { } t
             ? $"上次刷新 {t:HH:mm:ss}"
             : "尚未刷新";
+        FooterCount.Text = rows.Count == 0 ? "" : $"{rows.Count} 个 provider";
+        EmptyState.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
         RowsHost.Children.Clear();
-        foreach (var row in rows)
-            RowsHost.Children.Add(BuildRow(row));
+        for (var i = 0; i < rows.Count; i++)
+        {
+            RowsHost.Children.Add(BuildRow(rows[i]));
+            if (i < rows.Count - 1)
+                RowsHost.Children.Add(new Rectangle
+                {
+                    Height = 1,
+                    Fill = AeRes.Brush(this, "AeDividerBrush"),
+                });
+        }
     }
 
     private Brush LevelBrush(string level) => AeRes.Brush(this, level switch
@@ -60,44 +71,56 @@ public sealed partial class OverviewPage : UserControl
     private Brush TextBrush() => AeRes.Brush(this, "AeTextPrimaryBrush");
     private Brush DimBrush() => AeRes.Brush(this, "AeTextSecondaryBrush");
 
-    private Border BuildRow(ProviderResult row)
+    /// <summary>kind → Segoe Fluent Icons 字形,未知 kind 落其它。</summary>
+    private static string KindGlyph(string kind) => kind switch
     {
-        var card = new Border { Style = (Style)Application.Current.Resources["AeCardStyle"] };
+        "deepseek" => "\uE99A",
+        "zhipu" => "\uE943",
+        "minimax" => "\uE945",
+        "opencode_go" => "\uE756",
+        "relay" => "\uE968",
+        _ => "\uE774",
+    };
 
-        var grid = new Grid { ColumnSpacing = 12 };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+    private FrameworkElement BuildRow(ProviderResult row)
+    {
+        var stack = new StackPanel { Spacing = 6 };
 
-        // 左列:名称行 + 胶囊 + detail
-        var left = new StackPanel { Spacing = 6 };
+        // 上半:36px 图标 + (名称行 / detail) + 主值
+        var top = new Grid { ColumnSpacing = 10 };
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var pausedBrush = AeRes.Brush(this, "AePausedBrush");
+        var iconChip = new Border
+        {
+            Width = 36,
+            Height = 36,
+            CornerRadius = new CornerRadius(8),
+            BorderThickness = new Thickness(1),
+            BorderBrush = AeRes.Brush(this, "AeCardStrokeBrush"),
+            VerticalAlignment = VerticalAlignment.Top,
+            Child = new FontIcon
+            {
+                FontFamily = new FontFamily("Segoe Fluent Icons"),
+                FontSize = 16,
+                Glyph = KindGlyph(row.Kind),
+                Foreground = row.Paused ? pausedBrush : DimBrush(),
+            },
+        };
+        Grid.SetColumn(iconChip, 0);
+        top.Children.Add(iconChip);
+
+        var mid = new StackPanel { Spacing = 3, VerticalAlignment = VerticalAlignment.Center };
 
         var nameRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        nameRow.Children.Add(new Ellipse
-        {
-            Width = 8, Height = 8,
-            Fill = LevelBrush(row.Level),
-            VerticalAlignment = VerticalAlignment.Center,
-        });
         nameRow.Children.Add(new TextBlock
         {
             Text = row.Name,
-            FontSize = 15,
+            FontSize = 14,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Foreground = TextBrush(),
-            VerticalAlignment = VerticalAlignment.Center,
-        });
-        nameRow.Children.Add(new Border
-        {
-            Background = DimBrush(),
-            Opacity = 0.25,
-            CornerRadius = new CornerRadius(4),
-            Padding = new Thickness(6, 1, 6, 2),
-            Child = new TextBlock
-            {
-                Text = row.Kind,
-                FontSize = 11,
-                Foreground = TextBrush(),
-            },
             VerticalAlignment = VerticalAlignment.Center,
         });
         if (row.Paused)
@@ -108,34 +131,24 @@ public sealed partial class OverviewPage : UserControl
                 Foreground = DimBrush(),
                 VerticalAlignment = VerticalAlignment.Center,
             });
-        left.Children.Add(nameRow);
-
-        var bar = new ProgressBar
-        {
-            Minimum = 0,
-            Maximum = 100,
-            Height = 6,
-            CornerRadius = new CornerRadius(3),
-        };
-        if (row.Pct is not null) bar.Value = Math.Clamp(row.Pct.Value, 0, 100);
-        left.Children.Add(bar);
+        mid.Children.Add(nameRow);
 
         var detail = row.Detail;
         if (row.Error is not null) detail = row.Error;
-        left.Children.Add(new TextBlock
+        mid.Children.Add(new TextBlock
         {
             Text = detail,
             FontSize = 12,
             TextTrimming = TextTrimming.CharacterEllipsis,
             Foreground = DimBrush(),
         });
-        Grid.SetColumn(left, 0);
-        grid.Children.Add(left);
+        Grid.SetColumn(mid, 1);
+        top.Children.Add(mid);
 
         // 右列:主值(剩余/已用)
         var mainValue = new TextBlock
         {
-            FontSize = 20,
+            FontSize = 16,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Foreground = TextBrush(),
             VerticalAlignment = VerticalAlignment.Center,
@@ -149,11 +162,29 @@ public sealed partial class OverviewPage : UserControl
         else
             mainValue.Text = row.Level == Levels.Error ? "错误" : "-";
         if (row.Error is not null && row.Level != Levels.Unconfigured)
+        {
             mainValue.Text = "!";
-        Grid.SetColumn(mainValue, 1);
-        grid.Children.Add(mainValue);
+            mainValue.Foreground = LevelBrush(row.Level);
+        }
+        Grid.SetColumn(mainValue, 2);
+        top.Children.Add(mainValue);
 
-        card.Child = grid;
+        stack.Children.Add(top);
+
+        // 下半:3px 等级色细条(整行宽,无值时空轨)
+        var bar = new ProgressBar
+        {
+            Minimum = 0,
+            Maximum = 100,
+            Height = 3,
+            CornerRadius = new CornerRadius(1.5),
+            Foreground = LevelBrush(row.Level),
+            Background = AeRes.Brush(this, "AeDividerBrush"),
+        };
+        if (row.Pct is not null) bar.Value = Math.Clamp(row.Pct.Value, 0, 100);
+        stack.Children.Add(bar);
+
+        var host = new Grid { Children = { stack } };
 
         // 行右键菜单(对齐 Python row_menu:暂停/编辑/删除)
         var menu = new MenuFlyout();
@@ -172,9 +203,9 @@ public sealed partial class OverviewPage : UserControl
         miDelete.Click += async (_, _) => await SettingsPage.ConfirmDeleteAsync(
             _app, this, row.Name);
         menu.Items.Add(miDelete);
-        card.ContextFlyout = menu;
+        host.ContextFlyout = menu;
 
-        return card;
+        return host;
     }
 
     private void TogglePause(string name)
@@ -183,12 +214,6 @@ public sealed partial class OverviewPage : UserControl
         _ = _app.Poller.RefreshNowAsync();
     }
 
-    private void BtnRefresh_Click(object sender, RoutedEventArgs e) =>
-        _ = _app.Poller.RefreshNowAsync();
-
-    private void BtnTogglePause_Click(object sender, RoutedEventArgs e)
-    {
-        var paused = _app.Poller.ToggleGlobalPause();
-        BtnTogglePause.Content = paused ? "恢复轮询" : "暂停轮询";
-    }
+    private void OpenSettings_Click(object sender, RoutedEventArgs e)
+        => _main.GoSettings();
 }
