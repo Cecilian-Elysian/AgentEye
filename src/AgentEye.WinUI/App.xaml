@@ -1,0 +1,40 @@
+<Application
+    x:Class="AgentEye.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+                <ResourceDictionary Source="ms-appx:///Styles/AeStyles.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary.ThemeDictionaries>
+                <!-- 浅色令牌(fluent.py LIGHT_TOKENS 取向) -->
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="AeBackdropBrush" Color="#F3F3F3" />
+                    <SolidColorBrush x:Key="AeCardBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="AeCardStrokeBrush" Color="#E0E0E0" />
+                    <SolidColorBrush x:Key="AeTextPrimaryBrush" Color="#1A1A1A" />
+                    <SolidColorBrush x:Key="AeTextSecondaryBrush" Color="#5E5E5E" />
+                    <SolidColorBrush x:Key="AeDividerBrush" Color="#E8E8E8" />
+                </ResourceDictionary>
+                <!-- 深色令牌 -->
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="AeBackdropBrush" Color="#202020" />
+                    <SolidColorBrush x:Key="AeCardBrush" Color="#2B2B2B" />
+                    <SolidColorBrush x:Key="AeCardStrokeBrush" Color="#383838" />
+                    <SolidColorBrush x:Key="AeTextPrimaryBrush" Color="#FFFFFF" />
+                    <SolidColorBrush x:Key="AeTextSecondaryBrush" Color="#A0A0A0" />
+                    <SolidColorBrush x:Key="AeDividerBrush" Color="#333333" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+
+            <!-- 等级色(深浅共用) -->
+            <SolidColorBrush x:Key="AeOkBrush" Color="#6CCB5F" />
+            <SolidColorBrush x:Key="AeWarnBrush" Color="#FFC24C" />
+            <SolidColorBrush x:Key="AeCriticalBrush" Color="#FF6B6B" />
+            <SolidColorBrush x:Key="AeErrorBrush" Color="#FF6B6B" />
+            <SolidColorBrush x:Key="AePausedBrush" Color="#8A8A8A" />
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

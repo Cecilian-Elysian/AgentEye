@@ -1,72 +1,83 @@
-# AGENTS.md
-
-AgentEye 的工程契约。
+# AgentEye 的工程契约(WinUI 3 版)。
 
 ## 项目定位
 
-Windows 桌面常驻的多 Key AI 额度观察工具。UI 采用 macOS 视觉取向(交通灯、
-essential 单行条带),但**只支持 Windows**,依赖 DPAPI、WinRT toast 与
-`ctypes.windll` DPI 感知,不承诺跨平台。
+Windows 桌面多 Key AI 额度观察工具。UI 采用 Win11 Acrylic 紧凑毛玻璃面板
+(单窗、无导航栏、图标头部),另有两个常驻面:无边框桌面小组件(不抢焦点)
+与托盘图标(图标上 GDI 渲染最紧张 provider 的数字)。
+**只支持 Windows 10 1809+ / Win11**,依赖 DPAPI、WinRT toast 与 WinAppSDK,
+不承诺跨平台。Python/Tkinter 原版只存在于 `main` 与 `feat/glass-redesign`
+的历史里,不再维护。
 
-## 编码风格
+## 三层结构
 
-1. 不使用 emoji。箭头(`→ ←`)、`≈`、`✓` `✗` 等排版与文本符号不在此列。
-   `tests/test_style.py` 会扫描运行时源码并拦截。
-2. 公开 API 使用中文 docstring。
-3. Tk 主题色一律走 `ui.theme.PALETTE` + `to_tk_color()`,不要硬编码 hex。
-   模块级颜色字典在主题切换时必须同步刷新,否则浅色主题会残留深色框。
-4. 进度条宽度由 `<Configure>` 事件驱动,读 `event.width`,不要用
-   `winfo_width() or 300` 兜底(首帧布局未完成时拿到 1 px)。
-5. UI 不直接 import `providers` 适配器模块,只经 `providers/__init__.py` 的注册表。
-6. 配置读写只走 v2 schema(`providers[]`),不要重新引入 v1 的分立数组。
-7. provider 名称必须唯一。`ui/panel.py` 的 `self._rows` 与行级操作都按 `name`
-   索引,重名会让其中一行不再被 `_paint_row` 刷新,且编辑/删除/暂停命中错误条目。
-   新增任何能改名字的入口都要传 `taken_names` 给 `AddKeyForm`。
-8. 保持依赖最小化:运行时仅依赖 `requests`;密钥加密用 `secure.py` 里的
-   ctypes 调 DPAPI,通知用 `notify.py` 里的 WinRT + `winsound`。
+- `src/AgentEye.Core`:net8.0 纯逻辑,**零 UI 依赖**——config v2 读写、
+  DPAPI 加解密、6 种 provider 适配器、缓存、阈值判定。只引
+  `System.Security.Cryptography.ProtectedData`。
+- `src/AgentEye.WinUI`:WinUI 3 壳——MainWindow(去导航紧凑单窗)、
+  Pages(总览/设置)、Widget(小组件)、Tray(托盘)、Services(AeRes /
+  Poller / Notify / AppServices)、Styles(AeStyles.xaml)。
+- `tests/AgentEye.Core.Tests`:xUnit,只测 Core(契约层),WinUI 层靠
+  人工核对。
 
-## 密钥契约
+## 构建与测试
 
-| 形态 | 字段 |
-|---|---|
-| 内存 | `provider["key"]` 明文 |
-| 磁盘 | `provider["key_enc"]` base64(DPAPI),**没有** `key` |
+```text
+dotnet build src\AgentEye.WinUI -c Debug -v q --nologo   # 0 error 才算过
+dotnet test tests\AgentEye.Core.Tests -v q --nologo      # 56 passed
+```
 
-`config.save_v2` 在 `deepcopy` 上加密后写盘,绝不改写调用方的 `cfg`;
-写盘失败(目录不可写、序列化失败)会抛 `ConfigError` 族异常,调用方要
-么接住转成 UI 提示,要么让它沿 `main._run()` 变成退出码 2。
-`config.load_v2` 负责把 `key_enc` 还原成明文;文件损坏时会先隔离成
-`config.json.corrupt-<时间戳>` 再按空配置启动,不会抛。任何新增的读
-key 路径都要走 `config.plain_key()` 或 `providers._resolve_key()`,
-直接 `entry["key"]` 会在加密生效后拿到空串;`_resolve_key()` 对
-key_enc 解密失败会抛 `providers.KeyDecryptError`,与"未配置"区分。
+冒烟:启动 exe 7 秒未退出。改 XAML 后必须重构建确认 pass1 没有静默崩。
 
-## 测试
+## 主题资源契约
 
-1. 默认运行 `python -m pytest tests -q`。
-2. 必须用 pytest,不要用 `unittest discover`:`tests/conftest.py` 给
-   `tk.Tk.__init__` 打了有限次重试,消掉 Windows 上反复建销 Tk root 时的
-   `TclError` 抖动,`unittest` 下不生效。
-3. 测试不得读写用户真实配置:`conftest.py` 的 autouse fixture 已把
-   `config.CONFIG_PATH` 与 `cache` 的所有落盘路径指到每测试专属的
-   tmp 目录,新测试默认免配置;要改行为时用 monkeypatch 而不是恢复旧
-   mixin 写法。
-4. 新增 UI 入口时同步补 `tests/test_pause_and_actions.py` 里的 action 清单
-   和 `tests/test_p0_fixes.py::TestActionWiringCompleteness`
-   (KNOWN_MISSING 记录的是已确认未接线的入口,新入口不许加进去),
-   避免 `.get(..., lambda: None)` 把未接线入口静默吞掉。
-5. UI 测试里创建 `Panel` / `EssentialBar` 后、销毁 root 前要调
-   `stop()` 停掉 1Hz 定时器(conftest 也会兜底),否则残留 after 回调
-   会把整个 pytest 进程崩在 Tk 内部,且崩在下一个测试里。
+- 代码里取主题画刷**必须走 `Services/AeRes.Brush(el, key)` /
+  `BrushOrNull`**;普通 `Application.Current.Resources.TryGetValue`
+  不会下钻 ThemeDictionaries,拿到的永远是默认主题——禁止直连。
+- 新增主题色必须同时给 `App.xaml` 的 Light/Dark 两个子字典;主题无关色
+  (等级色、`AeErrorBrush`)放根字典,可用 `{StaticResource}` 直引。
+- 样式集中在 `Styles/AeStyles.xaml`;删样式前先全工程搜引用。
+- 代码画的行(总览/小组件)在 `ActualThemeChanged` 里整批重渲染。
+
+## XAML 契约
+
+- 属性值若以 `{` 开头(如字面 JSON)必须写成 `{}{...}` 转义,否则
+  XamlCompiler pass1 静默崩溃、无报错行号。
+- 头部图标按钮是 32×32、透明底、圆角 6 的 `Button` + `FontIcon`;
+  按钮区右侧留白 = `AppWindow.TitleBar.RightInset / RasterizationScale`
+  (物理像素换算 DIP),别硬编码。
+- 图标字形统一用 Segoe Fluent Icons 码位(E769/E768/E72C/E713/E72B、
+  行图标 E99A/E943/E945/E756/E968/E774),不许内嵌图片。
+
+## 中文文件
+
+含中文的文件一律用编辑器工具(Read/Write/Edit)读写;PowerShell 5.1 的
+`Get-/Set-Content` 按 GBK 解码 UTF-8,会把整个文件写坏。字节级复制
+(Copy-Item / robocopy)安全。
+
+## config 契约(与 Python 版同源,不得破坏)
+
+- `~/.agenteye/config.json`,v2 schema(`providers[]` + `ui.*` +
+  `alert.*`),`schema_version` 非 2 即按版本异常处理。
+- API Key 内存态明文、磁盘态 `key_enc`(DPAPI CurrentUser + 标准
+  base64);写盘前深拷贝加密,发现明文残留直接抛 `PlaintextKeyError`。
+- 损坏隔离:JSON/UTF-8/根类型坏 → 先把原文件改名
+  `config.json.corrupt-<时间戳>-<随机>` 再按模板启动,**绝不覆盖原文**。
+- v1(5 个分立数组)自动迁移,原文件 DPAPI 加密备份 `.v1.bak`。
+- 写盘必须原子(临时文件 + `File.Move` + flush-to-disk)。
+- 环境变量覆盖解密后的 key(`*_API_KEY`),且不落盘。
+- UI 只暴露 url/key/model;其余字段让用户手改 config。
+- 小组件几何:`ui.widget_pos` 落盘取松手时的 `_lastPos`(事件坐标),
+  不读 `AppWindow.Position`(回显滞后);松手位移 <4px 判点击。
+
+## 增强面降级
+
+托盘(`TrayIconService`,Shell_NotifyIconW + GDI 数字图标,配色硬编码是
+设计决定勿改)与小组件(`WidgetWindow`,WS_EX_NOACTIVATE|TOOLWINDOW)
+都是增强面:任何 Win32/WinRT 步骤失败只能静默降级,不许把主流程带崩。
+`DesktopAcrylicBackdrop` 在老系统上可能抛异常,赋值处必须 try/catch。
 
 ## 退出码
 
-`main._run()` 抛出,`python main.py` 的返回值:
-
-| 码 | 含义 |
-|---|---|
-| 0 | 正常退出(含用户点关闭) |
-| 1 | 未预期异常 |
-| 2 | 配置无效:`ConfigError` / `ConfigVersionError`(含 save_v2 写盘失败) |
-| 3 | `requests` 依赖缺失 |
-| 4 | 当前 Python 未包含 `tkinter` |
+`dotnet run` 场景不承诺退出码;Core 抛 `ConfigError` 族在壳层兜住后
+弹错误 UI。进程因未处理异常退出即为 bug。

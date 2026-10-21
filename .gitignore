@@ -1,15 +1,13 @@
-__pycache__/
-*.pyc
-*.pyo
-*.egg-info/
-.venv/
-venv/
-.env
+bin/
+obj/
+.vs/
+*.user
+*.suo
+AppPackages/
+artifacts/
+TestResults/
+.idea/
 *.swp
-.DS_Store
 
-# 截图与调试产物
-panel_*.png
-screenshot_*.png
-*.demo.py
-demo_*.py
+# 个人文件,永不提交
+2026.10.1 7 reverse.txt

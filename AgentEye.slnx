@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AgentEye.Core/AgentEye.Core.csproj" />
+    <Project Path="src/AgentEye.WinUI/AgentEye.WinUI.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AgentEye.Core.Tests/AgentEye.Core.Tests.csproj" />
+  </Folder>
+</Solution>
