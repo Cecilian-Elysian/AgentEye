@@ -1,16 +1,18 @@
 # AgentEye (WinUI 3)
 
 Windows 桌面多 Key AI 额度观察工具的 WinUI 3 重写版。与 Python/Tkinter 原版
-(`../AgentEye`)共用同一份 `~/.agenteye/config.json` 与缓存目录,可直接替换使用。
+(存在于 `main` 与 `feat/glass-redesign` 分支历史)共用同一份
+`~/.agenteye/config.json` 与缓存目录,可直接替换使用。
 
 ## 功能
 
-- 主面板:Mica 背板 + NavigationView 壳,总览页(全部 provider 的余额/百分比
-  KPI)与设置页(外观 / 轮询与告警 / API 管理)。
+- 主面板:Win11 Acrylic 紧凑毛玻璃面板(单窗、无导航栏、图标头部),
+  总览页(全部 provider 的余额/百分比行)与设置页(外观 / 告警 / API 管理)。
 - 托盘:Shell_NotifyIconW 常驻,图标上 GDI 渲染最紧张 provider 的已用百分比;
   左键唤起主面板,右键菜单(暂停轮询 / 立即刷新 / 切换小组件 / 退出)。
-- 桌面小组件:无边框置顶 240x56,不抢焦点(WS_EX_NOACTIVATE),按住拖动、
-  松手位移 < 4px 判定为点击并唤起主面板,位置随关窗落盘。
+- 桌面小组件:无边框置顶 260x64(高度随行数自适应),Acrylic 背板,
+  不抢焦点(WS_EX_NOACTIVATE),按住拖动、松手位移 < 4px 判定为点击并
+  唤起主面板,位置随关窗落盘。
 - 通知:WinRT AppNotification toast,同一 provider 同一等级 60 分钟冷却,
   升级(黄转红)会重新告警;toast 不可用时降级 MessageBeep。
 
@@ -30,7 +32,7 @@ dotnet build src\AgentEye.WinUI -c Debug
 dotnet test tests\AgentEye.Core.Tests
 ```
 
-50 个测试覆盖配置层(v2 schema、DPAPI、v1 迁移、损坏隔离)与 provider 层
+56 个测试覆盖配置层(v2 schema、DPAPI、v1 迁移、损坏隔离)与 provider 层
 (探测、6 种适配器、中转站、缓存、告警状态)。
 
 ## 文件结构
@@ -42,11 +44,15 @@ src\AgentEye.Core        逻辑层(net8.0,无 UI 依赖)
   Cache\                 models/probe/alert 状态缓存
 src\AgentEye.WinUI       壳层(WinUI 3)
   Pages\                 OverviewPage / SettingsPage
-  Services\              AppServices / PollerService / NotifyService
+  Services\              AeRes / AppServices / PollerService / NotifyService
+  Styles\                AeStyles.xaml(工程自有样式)
   Tray\                  托盘(纯 Win32 + GDI)
   Widget\                桌面小组件
 tests\AgentEye.Core.Tests
 ```
+
+工程契约(资源取用、XAML 坑、config 兼容)见 `AGENTS.md`;改造执行计划
+收录于 `docs\PLAN-winui-acrylic.md`;变更记录见 `CHANGELOG.md`。
 
 ## 与 Python 版的已知差异
 

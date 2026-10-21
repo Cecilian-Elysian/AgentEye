@@ -1,0 +1,39 @@
+# Changelog
+
+## 2026-10-21 — WinUI 3 紧凑毛玻璃面板(feat/winui-acrylic)
+
+本分支起 AgentEye 转为 WinUI 3 实现,Python/Tkinter 原版只保留在
+`main` 与 `feat/glass-redesign` 的历史里。
+
+### 新增
+
+- 三层工程:`src/AgentEye.Core`(纯逻辑,零 UI 依赖)、
+  `src/AgentEye.WinUI`(壳)、`tests/AgentEye.Core.Tests`(xUnit,56 例)。
+- 主面板:Win11 Acrylic(`DesktopAcrylicBackdrop`)+ `AeGlassTintBrush`
+  着色罩(浅 `#8CF2F2F2` / 深 `#8C000000`),紧凑单窗 420×560、
+  宽度夹 [360,520]。
+- 头部图标按钮组(32×32 圆角 6):返回 E72B / 暂停 E769↔E768 /
+  立即刷新 E72C / 设置 E713;右侧留白按
+  `TitleBar.RightInset / RasterizationScale` 动态换算。
+- 总览行扁平化直排玻璃:36px kind 图标 chip(deepseek E99A / zhipu E943 /
+  minimax E945 / opencode_go E756 / relay E968 / 其它 E774)+
+  3px 等级色细条 + 1px 分割线 + 页脚(上次刷新 / provider 数)。
+- 小组件:260×64 起步、高度随行数自适应(修旧版 3 行必裁切),
+  Acrylic 背板(老系统实底降级),行内 2px 等级细条。
+- config 模板默认几何 420×560(原 360×360)。
+
+### 变更
+
+- 主窗口去 `NavigationView`:总览/设置靠可见性切换;`GoSettings()`
+  保留公开入口(托盘在用),托盘来的调用统一封送 UI 线程。
+- 设置页去卡片:分组透明直排,适配紧凑窗宽。
+- `AeStyles.xaml` 删除零引用的 AeKpi*/AeCardStyle/AeCardCornerRadius。
+
+### 修复
+
+- 托盘暂停态与主面板暂停按钮字形联动(`SyncPauseGlyph` 封送)。
+
+### 兼容性
+
+- `~/.agenteye/config.json` v2 schema、DPAPI `key_enc`、损坏隔离、
+  v1 自动迁移与 Python 版完全同源,可直接替换使用。
