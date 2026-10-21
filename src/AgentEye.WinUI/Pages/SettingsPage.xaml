@@ -4,103 +4,92 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:muxc="using:Microsoft.UI.Xaml.Controls">
 
-    <ScrollViewer Padding="24,16,24,16" VerticalScrollBarVisibility="Auto">
-        <StackPanel Spacing="20" MaxWidth="860" HorizontalAlignment="Left">
+    <ScrollViewer Padding="20,12,20,12" VerticalScrollBarVisibility="Auto">
+        <StackPanel Spacing="16" MaxWidth="480" HorizontalAlignment="Left">
 
             <!-- 外观 -->
-            <Border Style="{StaticResource AeCardStyle}">
-                <StackPanel Spacing="8">
-                    <TextBlock Text="外观" Style="{StaticResource AeSectionTitleStyle}" />
-                    <muxc:RadioButtons x:Name="ThemeChoice" SelectionChanged="Theme_Changed">
-                        <muxc:RadioButton Content="深色" />
-                        <muxc:RadioButton Content="浅色" />
-                        <muxc:RadioButton Content="跟随系统" />
-                    </muxc:RadioButtons>
-                </StackPanel>
-            </Border>
+            <StackPanel Spacing="8">
+                <TextBlock Text="外观" Style="{StaticResource AeSectionTitleStyle}" />
+                <muxc:RadioButtons x:Name="ThemeChoice" SelectionChanged="Theme_Changed">
+                    <muxc:RadioButton Content="深色" />
+                    <muxc:RadioButton Content="浅色" />
+                    <muxc:RadioButton Content="跟随系统" />
+                </muxc:RadioButtons>
+            </StackPanel>
 
             <!-- 告警(轮询周期等走 config 文件) -->
-            <Border Style="{StaticResource AeCardStyle}">
-                <StackPanel Spacing="10">
-                    <TextBlock Text="告警" Style="{StaticResource AeSectionTitleStyle}" />
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <ToggleSwitch x:Name="AlertEnable" MinWidth="0"
-                                      OnContent="告警开" OffContent="告警关"
-                                      Toggled="AlertToggle_Changed" />
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <TextBlock Text="剩余百分比 ≤" VerticalAlignment="Center" />
-                        <muxc:NumberBox x:Name="WarnPctBox" MinWidth="90" Minimum="0"
-                                        Maximum="100" SpinButtonPlacementMode="Compact"
-                                        ValueChanged="AlertNum_Changed" />
-                        <TextBlock Text="% 记为黄;剩余额度 ≤" VerticalAlignment="Center" />
-                        <muxc:NumberBox x:Name="CriticalYuanBox" MinWidth="90" Minimum="0"
-                                        SpinButtonPlacementMode="Compact"
-                                        ValueChanged="AlertNum_Changed" />
-                        <TextBlock Text="元记为红" VerticalAlignment="Center" />
-                    </StackPanel>
+            <StackPanel Spacing="10">
+                <TextBlock Text="告警" Style="{StaticResource AeSectionTitleStyle}" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <ToggleSwitch x:Name="AlertEnable" MinWidth="0"
+                                  OnContent="告警开" OffContent="告警关"
+                                  Toggled="AlertToggle_Changed" />
                 </StackPanel>
-            </Border>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="剩余百分比 ≤" VerticalAlignment="Center" />
+                    <muxc:NumberBox x:Name="WarnPctBox" MinWidth="90" Minimum="0"
+                                    Maximum="100" SpinButtonPlacementMode="Compact"
+                                    ValueChanged="AlertNum_Changed" />
+                    <TextBlock Text="% 记为黄;剩余额度 ≤" VerticalAlignment="Center" />
+                    <muxc:NumberBox x:Name="CriticalYuanBox" MinWidth="90" Minimum="0"
+                                    SpinButtonPlacementMode="Compact"
+                                    ValueChanged="AlertNum_Changed" />
+                    <TextBlock Text="元记为红" VerticalAlignment="Center" />
+                </StackPanel>
+            </StackPanel>
 
             <!-- API 管理 -->
-            <Border Style="{StaticResource AeCardStyle}">
-                <Grid x:Name="ManageRoot" RowSpacing="10">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
-
-                    <Grid Grid.Row="0">
-                        <TextBlock Text="API 管理" Style="{StaticResource AeSectionTitleStyle}" />
-                        <Button Content="添加 Key" HorizontalAlignment="Right"
-                                Click="BtnAdd_Click" />
-                    </Grid>
-
-                    <!-- 列表态 -->
-                    <StackPanel x:Name="ListPane" Grid.Row="1" Spacing="10">
-                        <ListView x:Name="ProviderList" MaxHeight="320"
-                                  SelectionMode="Single"
-                                  DoubleTapped="ProviderList_DoubleTapped" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Content="编辑" Click="BtnEdit_Click" />
-                            <Button Content="删除" Click="BtnDelete_Click" />
-                        </StackPanel>
-                    </StackPanel>
-
-                    <!-- 表单态:只保留 url / key / model,其余走 config 文件 -->
-                    <StackPanel x:Name="FormPane" Grid.Row="1" Spacing="10"
-                                Visibility="Collapsed">
-                        <Grid ColumnSpacing="10" RowSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="140" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-
-                            <TextBlock Text="Base URL" VerticalAlignment="Center" />
-                            <TextBox x:Name="FBaseUrl" Grid.Column="1"
-                                     PlaceholderText="https://api.example.com" />
-                            <TextBlock Text="API Key" Grid.Row="1" VerticalAlignment="Center" />
-                            <TextBox x:Name="FKey" Grid.Row="1" Grid.Column="1"
-                                     PlaceholderText="粘贴 key;留空则沿用已存 key" />
-                            <TextBlock Text="Model" Grid.Row="2" VerticalAlignment="Center" />
-                            <TextBox x:Name="FModel" Grid.Row="2" Grid.Column="1"
-                                     PlaceholderText="如 deepseek-chat;额度端点不可用时用真实对话探测" />
-                        </Grid>
-                        <TextBlock x:Name="FormError" Foreground="{StaticResource AeErrorBrush}"
-                                   Visibility="Collapsed" TextWrapping="Wrap" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button Style="{StaticResource AccentButtonStyle}"
-                                    Content="保存" Click="BtnSave_Click" />
-                            <Button Content="取消" Click="BtnCancel_Click" />
-                        </StackPanel>
-                    </StackPanel>
+            <StackPanel x:Name="ManageRoot" Spacing="10">
+                <Grid>
+                    <TextBlock Text="API 管理" Style="{StaticResource AeSectionTitleStyle}" />
+                    <Button Content="添加 Key" HorizontalAlignment="Right"
+                            Click="BtnAdd_Click" />
                 </Grid>
-            </Border>
+
+                <!-- 列表态 -->
+                <StackPanel x:Name="ListPane" Spacing="10">
+                    <ListView x:Name="ProviderList" MaxHeight="320"
+                              SelectionMode="Single"
+                              DoubleTapped="ProviderList_DoubleTapped" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="编辑" Click="BtnEdit_Click" />
+                        <Button Content="删除" Click="BtnDelete_Click" />
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- 表单态:只保留 url / key / model,其余走 config 文件 -->
+                <StackPanel x:Name="FormPane" Spacing="10"
+                            Visibility="Collapsed">
+                    <Grid ColumnSpacing="10" RowSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="140" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Text="Base URL" VerticalAlignment="Center" />
+                        <TextBox x:Name="FBaseUrl" Grid.Column="1"
+                                 PlaceholderText="https://api.example.com" />
+                        <TextBlock Text="API Key" Grid.Row="1" VerticalAlignment="Center" />
+                        <TextBox x:Name="FKey" Grid.Row="1" Grid.Column="1"
+                                 PlaceholderText="粘贴 key;留空则沿用已存 key" />
+                        <TextBlock Text="Model" Grid.Row="2" VerticalAlignment="Center" />
+                        <TextBox x:Name="FModel" Grid.Row="2" Grid.Column="1"
+                                 PlaceholderText="如 deepseek-chat;额度端点不可用时用真实对话探测" />
+                    </Grid>
+                    <TextBlock x:Name="FormError" Foreground="{StaticResource AeErrorBrush}"
+                               Visibility="Collapsed" TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Style="{StaticResource AccentButtonStyle}"
+                                Content="保存" Click="BtnSave_Click" />
+                        <Button Content="取消" Click="BtnCancel_Click" />
+                    </StackPanel>
+                </StackPanel>
+            </StackPanel>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

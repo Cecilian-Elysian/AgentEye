@@ -11,7 +11,8 @@ using Windows.Graphics;
 namespace AgentEye.WinUI.Widget;
 
 /// <summary>
-/// 桌面小组件:无边框、置顶、不抢焦点(WS_EX_NOACTIVATE + WS_EX_TOOLWINDOW)。
+/// 桌面小组件:无边框、置顶、不抢焦点(WS_EX_NOACTIVATE + WS_EX_TOOLWINDOW),
+/// Acrylic 背板 + 行内 2px 等级细条,高度按行数自适应(空态 260×64)。
 /// 交互契约(端口自 Python ui/widget.py):
 /// - "点击 vs 拖动"在松手时判定,位移 < 4 px 视为点击唤起主面板
 /// - 松手落盘位置取事件请求坐标(AppWindow.Position 回显滞后一轮,不可信)
@@ -19,7 +20,8 @@ namespace AgentEye.WinUI.Widget;
 /// </summary>
 public sealed class WidgetWindow : IDisposable
 {
-    private const double Width = 240, Height = 56;
+    private const double Width = 260, HeightEmpty = 64;
+    private const double RowHeight = 18;   // 行 15 + 细条 2 + 间隙 1
 
     private readonly AppServices _app;
     private readonly MainWindow _main;
@@ -28,6 +30,7 @@ public sealed class WidgetWindow : IDisposable
     private nint _hwnd;
     private bool _visible;
     private bool _disposed;
+    private bool _solidFallback;   // Acrylic 建不起来(老系统)时用实底色
 
     // 拖动状态
     private bool _dragging;
@@ -66,8 +69,15 @@ public sealed class WidgetWindow : IDisposable
         presenter.IsResizable = false;
         presenter.IsMinimizable = false;
         presenter.IsMaximizable = false;
-        _window.AppWindow.Resize(new SizeInt32((int)Width, (int)Height));
+        _window.AppWindow.Resize(new SizeInt32((int)Width, (int)HeightEmpty));
         _window.AppWindow.IsShownInSwitchers = false;
+
+        // Acrylic 背板:老系统可能抛异常 → 实底降级(增强面契约)
+        try
+        {
+            _window.SystemBackdrop = new DesktopAcrylicBackdrop();
+        }
+        catch { _solidFallback = true; }
 
         _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(_window);
         if (_hwnd != nint.Zero)
@@ -162,7 +172,7 @@ public sealed class WidgetWindow : IDisposable
     /// <summary>重涂底色/描边(代码画,主题切换后必须手动来)。</summary>
     private void RepaintChrome()
     {
-        _root.Background = AeRes.Brush(_root, "AeCardBrush");
+        _root.Background = AeRes.Brush(_root, _solidFallback ? "AeCardBrush" : "AeGlassTintBrush");
         _root.BorderBrush = AeRes.BrushOrNull(_root, "AeCardStrokeBrush");
     }
 
@@ -201,21 +211,34 @@ public sealed class WidgetWindow : IDisposable
                 _ => 5,
             })
             .ThenBy(r => r.Pct ?? 999)
-            .Take(3);
+            .Take(3)
+            .ToList();
         foreach (var r in shown)
             host.Children.Add(BuildRow(r));
-        if (!shown.Any())
+        if (shown.Count == 0)
+        {
             host.Children.Add(new TextBlock
             {
                 Text = "未接入 provider",
                 FontSize = 11,
                 Opacity = 0.6,
             });
+        }
+
+        // 高度随行数自适应(空态 = HeightEmpty),修旧版 3 行必裁切
+        try
+        {
+            var h = shown.Count == 0
+                ? HeightEmpty
+                : 12 /*padding*/ + 13 /*title*/ + 4 /*gap*/ + shown.Count * RowHeight;
+            _window.AppWindow.Resize(new SizeInt32((int)Width, (int)Math.Ceiling(h)));
+        }
+        catch { /* 增强面 */ }
     }
 
     private FrameworkElement BuildRow(ProviderResult r)
     {
-        var dotColor = r.Level switch
+        var levelKey = r.Level switch
         {
             var l when l == Levels.Critical => "AeCriticalBrush",
             var l when l == Levels.Warn => "AeWarnBrush",
@@ -223,19 +246,21 @@ public sealed class WidgetWindow : IDisposable
             var l when l == Levels.Paused => "AePausedBrush",
             _ => "AePausedBrush",
         };
+        var levelBrush = AeRes.Brush(_root, levelKey);
+
         var dot = new Ellipse
         {
             Width = 7,
             Height = 7,
             VerticalAlignment = VerticalAlignment.Center,
-            Fill = AeRes.Brush(_root, dotColor),
+            Fill = levelBrush,
         };
         var name = new TextBlock
         {
             Text = r.Name,
             FontSize = 11,
             VerticalAlignment = VerticalAlignment.Center,
-            MaxWidth = 120,
+            MaxWidth = 140,
             TextTrimming = TextTrimming.CharacterEllipsis,
         };
         var value = new TextBlock
@@ -247,17 +272,30 @@ public sealed class WidgetWindow : IDisposable
                 : r.Remaining is not null ? $"{r.Remaining:F2} {r.Unit}"
                 : "-",
         };
-        var panel = new Grid { ColumnSpacing = 6 };
-        panel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        panel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        panel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var line = new Grid { ColumnSpacing = 6 };
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         Grid.SetColumn(dot, 0);
         Grid.SetColumn(name, 1);
         Grid.SetColumn(value, 2);
-        panel.Children.Add(dot);
-        panel.Children.Add(name);
-        panel.Children.Add(value);
-        return panel;
+        line.Children.Add(dot);
+        line.Children.Add(name);
+        line.Children.Add(value);
+
+        // 行内 2px 等级细条(无 pct 时空轨,等级色仍由点承担)
+        var bar = new ProgressBar
+        {
+            Height = 2,
+            Minimum = 0,
+            Maximum = 100,
+            CornerRadius = new CornerRadius(1),
+            Foreground = levelBrush,
+            Background = AeRes.BrushOrNull(_root, "AeDividerBrush"),
+        };
+        if (r.Pct is not null) bar.Value = Math.Clamp(r.Pct.Value, 0, 100);
+
+        return new StackPanel { Spacing = 1, Children = { line, bar } };
     }
 
     // ------------------------------------------------------------------

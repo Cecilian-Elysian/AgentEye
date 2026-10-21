@@ -43,8 +43,10 @@ dotnet test tests\AgentEye.Core.Tests -v q --nologo      # 56 passed
 
 - 属性值若以 `{` 开头(如字面 JSON)必须写成 `{}{...}` 转义,否则
   XamlCompiler pass1 静默崩溃、无报错行号。子元素排在属性元素
-  (如 `<Grid.RowDefinitions>`)**之前**同样触发 pass1 静默崩——
-  属性元素一律写在最前。
+  (如 `<Grid.RowDefinitions>`)**之前**会确定性复现 pass1 静默崩
+  (3/3)——属性元素一律写在最前。另:pass1 偶发无差别静默崩
+  (同内容重试即过,疑似增量状态/并行节点竞态),遇 MSB3073 无
+  诊断输出先原样重跑一次、再清 `obj` 重跑,别急着改代码。
 - 头部图标按钮是 32×32、透明底、圆角 6 的 `Button` + `FontIcon`;
   按钮区右侧留白 = `AppWindow.TitleBar.RightInset / RasterizationScale`
   (物理像素换算 DIP),别硬编码。
