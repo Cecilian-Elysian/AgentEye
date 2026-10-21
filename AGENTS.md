@@ -80,6 +80,8 @@ dotnet test tests\AgentEye.Core.Tests -v q --nologo      # 56 passed
 设计决定勿改)与小组件(`WidgetWindow`,WS_EX_NOACTIVATE|TOOLWINDOW)
 都是增强面:任何 Win32/WinRT 步骤失败只能静默降级,不许把主流程带崩。
 `DesktopAcrylicBackdrop` 在老系统上可能抛异常,赋值处必须 try/catch。
+系统「透明效果」关闭时(注册表 `EnableTransparency=0`)Windows 一律不渲染
+Acrylic/Mica,窗口退化为不透明底色——这是系统策略,别去代码里绕。
 
 ## 退出码
 

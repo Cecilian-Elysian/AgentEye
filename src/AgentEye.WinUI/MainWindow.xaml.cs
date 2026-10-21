@@ -187,16 +187,30 @@ public sealed partial class MainWindow : Window
         else ShowWidget();
     });
 
+    /// <summary>数值容错:JSON 里 int/double 都收(Python 版写的是 int,老配置不能被丢弃)。</summary>
+    private static double? AsNum(object? v)
+    {
+        if (v is null) return null;
+        try
+        {
+            var d = Convert.ToDouble(v, System.Globalization.CultureInfo.InvariantCulture);
+            return double.IsNaN(d) || double.IsInfinity(d) ? null : d;
+        }
+        catch { return null; }
+    }
+
     private void RestoreGeometry()
     {
         var ui = _app.UiDict();
         // 紧凑面板:420×560 兜底,宽度夹 [360,520]
-        var w = ui.TryGetValue("width", out var wd) && wd is double dw && dw >= 360
-            ? (int)Math.Clamp(dw, 360, 520) : 420;
-        var h = ui.TryGetValue("height", out var hd) && hd is double dh && dh >= 300 ? (int)dh : 560;
+        var wv = AsNum(ui.TryGetValue("width", out var wRaw) ? wRaw : null);
+        var w = wv is double dw && dw >= 360 ? (int)Math.Clamp(dw, 360, 520) : 420;
+        var hv = AsNum(ui.TryGetValue("height", out var hRaw) ? hRaw : null);
+        var h = hv is double dh && dh >= 300 ? (int)dh : 560;
         AppWindow.Resize(new SizeInt32(w, h));
-        if (ui.TryGetValue("x", out var x) && x is double dx &&
-            ui.TryGetValue("y", out var y) && y is double dy &&
+        var xv = AsNum(ui.TryGetValue("x", out var xRaw) ? xRaw : null);
+        var yv = AsNum(ui.TryGetValue("y", out var yRaw) ? yRaw : null);
+        if (xv is double dx && yv is double dy &&
             dx > -10000 && dy > -10000)
         {
             try { AppWindow.Move(new PointInt32((int)dx, (int)dy)); }

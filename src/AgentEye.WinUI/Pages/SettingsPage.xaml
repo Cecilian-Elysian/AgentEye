@@ -25,16 +25,20 @@
                                   OnContent="告警开" OffContent="告警关"
                                   Toggled="AlertToggle_Changed" />
                 </StackPanel>
+                <!-- 告警阈值拆两行:单行在 404px 内容宽里放不下(元记为红会被裁) -->
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <TextBlock Text="剩余百分比 ≤" VerticalAlignment="Center" />
                     <muxc:NumberBox x:Name="WarnPctBox" MinWidth="90" Minimum="0"
                                     Maximum="100" SpinButtonPlacementMode="Compact"
                                     ValueChanged="AlertNum_Changed" />
-                    <TextBlock Text="% 记为黄;剩余额度 ≤" VerticalAlignment="Center" />
+                    <TextBlock Text="% 记为黄" VerticalAlignment="Center" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="剩余额度 ≤" VerticalAlignment="Center" />
                     <muxc:NumberBox x:Name="CriticalYuanBox" MinWidth="90" Minimum="0"
                                     SpinButtonPlacementMode="Compact"
                                     ValueChanged="AlertNum_Changed" />
-                    <TextBlock Text="元记为红" VerticalAlignment="Center" />
+                    <TextBlock Text="元 记为红" VerticalAlignment="Center" />
                 </StackPanel>
             </StackPanel>
 
