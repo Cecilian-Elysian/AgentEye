@@ -34,6 +34,10 @@ dotnet test tests\AgentEye.Core.Tests -v q --nologo      # 56 passed
 - 代码里取主题画刷**必须走 `Services/AeRes.Brush(el, key)` /
   `BrushOrNull`**;普通 `Application.Current.Resources.TryGetValue`
   不会下钻 ThemeDictionaries,拿到的永远是默认主题——禁止直连。
+- `AeRes` 查主题子字典时**字符串键("Light"/"Dark")与枚举键
+  (ElementTheme.Light)都要试**:XAML 里写的是 `x:Key="Light"` 字符串,
+  `el.ActualTheme` 是枚举装箱值,两者不相等——只试一种会静默退化成
+  灰色兜底(行文字/分割线/小组件底色全变灰,很显眼)。
 - 新增主题色必须同时给 `App.xaml` 的 Light/Dark 两个子字典;主题无关色
   (等级色、`AeErrorBrush`)放根字典,可用 `{StaticResource}` 直引。
 - 样式集中在 `Styles/AeStyles.xaml`;删样式前先全工程搜引用。

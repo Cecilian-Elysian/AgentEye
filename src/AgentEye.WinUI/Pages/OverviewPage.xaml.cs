@@ -71,6 +71,11 @@ public sealed partial class OverviewPage : UserControl
     private Brush TextBrush() => AeRes.Brush(this, "AeTextPrimaryBrush");
     private Brush DimBrush() => AeRes.Brush(this, "AeTextSecondaryBrush");
 
+    /// <summary>等级色的淡版,当进度条轨道用(0% 剩余时也能看出等级)。</summary>
+    private static Brush LevelTrack(Brush level) => level is SolidColorBrush s
+        ? new SolidColorBrush(Windows.UI.Color.FromArgb(48, s.Color.R, s.Color.G, s.Color.B))
+        : level;
+
     /// <summary>kind → Segoe Fluent Icons 字形,未知 kind 落其它。</summary>
     private static string KindGlyph(string kind) => kind switch
     {
@@ -172,14 +177,16 @@ public sealed partial class OverviewPage : UserControl
         stack.Children.Add(top);
 
         // 下半:3px 等级色细条(整行宽,无值时空轨)
+        var level = LevelBrush(row.Level);
         var bar = new ProgressBar
         {
             Minimum = 0,
             Maximum = 100,
             Height = 3,
             CornerRadius = new CornerRadius(1.5),
-            Foreground = LevelBrush(row.Level),
-            Background = AeRes.Brush(this, "AeDividerBrush"),
+            Foreground = level,
+            // 轨道也带等级色:剩余 0% 时填充为空,不然等级完全看不出来
+            Background = LevelTrack(level),
         };
         if (row.Pct is not null) bar.Value = Math.Clamp(row.Pct.Value, 0, 100);
         stack.Children.Add(bar);

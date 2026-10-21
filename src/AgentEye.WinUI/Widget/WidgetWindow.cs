@@ -283,7 +283,7 @@ public sealed class WidgetWindow : IDisposable
         line.Children.Add(name);
         line.Children.Add(value);
 
-        // 行内 2px 等级细条(无 pct 时空轨,等级色仍由点承担)
+        // 行内 2px 等级细条(无 pct 时空轨,轨道带淡等级色)
         var bar = new ProgressBar
         {
             Height = 2,
@@ -291,7 +291,10 @@ public sealed class WidgetWindow : IDisposable
             Maximum = 100,
             CornerRadius = new CornerRadius(1),
             Foreground = levelBrush,
-            Background = AeRes.BrushOrNull(_root, "AeDividerBrush"),
+            Background = levelBrush is SolidColorBrush sc
+                ? new SolidColorBrush(Windows.UI.Color.FromArgb(
+                    48, sc.Color.R, sc.Color.G, sc.Color.B))
+                : levelBrush,
         };
         if (r.Pct is not null) bar.Value = Math.Clamp(r.Pct.Value, 0, 100);
 
