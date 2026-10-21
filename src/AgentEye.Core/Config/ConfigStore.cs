@@ -101,7 +101,7 @@ public sealed class ConfigStore
         },
         ["ui"] = new Dictionary<string, object?>
         {
-            ["x"] = null, ["y"] = null, ["width"] = 360, ["height"] = 360,
+            ["x"] = null, ["y"] = null, ["width"] = 420, ["height"] = 560,
             ["order"] = new List<object?>(), ["pinned"] = true,
             ["widget"] = false, ["theme"] = "auto",
         },

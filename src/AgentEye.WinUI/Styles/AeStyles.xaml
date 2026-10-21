@@ -4,6 +4,16 @@
 
     <x:Double x:Key="AeCardCornerRadius">8</x:Double>
 
+    <!-- 头部图标按钮:32×32 透明底圆角 6,承载 FontIcon -->
+    <Style x:Key="AeIconButtonStyle" TargetType="Button">
+        <Setter Property="Width" Value="32" />
+        <Setter Property="Height" Value="32" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="CornerRadius" Value="6" />
+    </Style>
+
     <Style x:Key="AeKpiCardStyle" TargetType="Border">
         <Setter Property="Background" Value="{ThemeResource AeCardBrush}" />
         <Setter Property="BorderBrush" Value="{ThemeResource AeCardStrokeBrush}" />

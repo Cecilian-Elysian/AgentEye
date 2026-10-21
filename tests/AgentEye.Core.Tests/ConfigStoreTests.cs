@@ -151,7 +151,7 @@ public sealed class ConfigStoreTests : IDisposable
         File.WriteAllText(_path, """{"schema_version": 2, "ui": null}""");
         var outcome = _store.LoadV2();
         var ui = Assert.IsType<Dictionary<string, object?>>(outcome.Config["ui"]);
-        Assert.Equal(360, ui["width"]);
+        Assert.Equal(420, ui["width"]);
         Assert.True((bool)ui["pinned"]!);
         var alert = Assert.IsType<Dictionary<string, object?>>(outcome.Config["alert"]);
         Assert.Equal(30, alert["warn_pct"]);

@@ -10,7 +10,7 @@ using Windows.Graphics;
 namespace AgentEye;
 
 /// <summary>
-/// 主窗口:Mica 背板 + NavigationView 导航壳(总览/设置)。
+/// 主窗口:Acrylic 背板 + 紧凑单窗(图标头部,无导航栏;总览/设置靠可见性切换)。
 /// 装配面:配置加载、轮询启动、托盘与小组件挂载、几何持久化。
 /// </summary>
 public sealed partial class MainWindow : Window
@@ -69,6 +69,14 @@ public sealed partial class MainWindow : Window
         // 主题跟随系统:auto 时系统切换会触发这里,同步按钮配色即可,
         // 页面/小组件各自监听 ActualThemeChanged 重渲染
         Root.ActualThemeChanged += (_, _) => SyncCaptionButtons();
+
+        // 标题栏右侧留白 = 物理像素换算 DIP,别硬编码
+        try
+        {
+            HeaderButtons.Margin = new Thickness(
+                0, 0, AppWindow.TitleBar.RightInset / Root.XamlRoot.RasterizationScale, 0);
+        }
+        catch { /* XamlRoot 未就绪等:忽略,按钮区右侧留白稍宽无碍 */ }
     }
 
     public void ApplyTheme(string choice)
@@ -115,16 +123,38 @@ public sealed partial class MainWindow : Window
         _overview.Visibility = tag == "overview" ? Visibility.Visible : Visibility.Collapsed;
         _settings.Visibility = tag == "settings" ? Visibility.Visible : Visibility.Collapsed;
         _settings.OnShown();
+        BtnBack.Visibility = tag == "settings" ? Visibility.Visible : Visibility.Collapsed;
         AppTitle.Text = tag == "overview" ? "AgentEye" : "AgentEye — 设置";
     }
 
-    private void Nav_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
+    // ---------------- 头部图标按钮 ----------------
+
+    private void BtnPause_Click(object sender, RoutedEventArgs e)
     {
-        if (sender.SelectedItem is NavigationViewItem item && item.Tag is string tag)
-            ShowPage(tag);
+        var paused = _app.Poller.ToggleGlobalPause();
+        if (!paused) _ = _app.Poller.RefreshNowAsync();
+        SyncPauseGlyph();
     }
 
-    public void GoSettings() => Nav.SelectedItem = Nav.MenuItems[1];
+    private void BtnRefresh_Click(object sender, RoutedEventArgs e)
+        => _ = _app.Poller.RefreshNowAsync();
+
+    private void BtnSettings_Click(object sender, RoutedEventArgs e)
+        => ShowPage("settings");
+
+    private void BtnBack_Click(object sender, RoutedEventArgs e)
+        => ShowPage("overview");
+
+    /// <summary>暂停按钮字形/提示随全局暂停态切换(托盘切了也要跟上)。</summary>
+    public void SyncPauseGlyph() => DispatcherQueue.TryEnqueue(() =>
+    {
+        var paused = _app.Poller.IsGloballyPaused;
+        PauseIcon.Glyph = paused ? "\uE768" : "\uE769";
+        ToolTipService.SetToolTip(BtnPause, paused ? "恢复轮询" : "暂停轮询");
+    });
+
+    /// <summary>托盘/外部入口:封送 UI 线程后进设置页。</summary>
+    public void GoSettings() => DispatcherQueue.TryEnqueue(() => ShowPage("settings"));
 
     public SettingsPage Settings => _settings!;
 
@@ -144,24 +174,26 @@ public sealed partial class MainWindow : Window
 
     public bool WidgetVisible => _widget?.IsVisible ?? false;
 
-    public void ToggleWidget()
-    {
-        if (WidgetVisible) HideWidget();
-        else ShowWidget();
-    }
-
-    public void RestoreFromTray()
+    public void RestoreFromTray() => DispatcherQueue.TryEnqueue(() =>
     {
         Activate();
         AppWindow.Show();
         SetForegroundWindow(WindowNative.GetWindowHandle(this));
-    }
+    });
+
+    public void ToggleWidget() => DispatcherQueue.TryEnqueue(() =>
+    {
+        if (WidgetVisible) HideWidget();
+        else ShowWidget();
+    });
 
     private void RestoreGeometry()
     {
         var ui = _app.UiDict();
-        var w = ui.TryGetValue("width", out var wd) && wd is double dw && dw >= 400 ? (int)dw : 900;
-        var h = ui.TryGetValue("height", out var hd) && hd is double dh && dh >= 300 ? (int)dh : 640;
+        // 紧凑面板:420×560 兜底,宽度夹 [360,520]
+        var w = ui.TryGetValue("width", out var wd) && wd is double dw && dw >= 360
+            ? (int)Math.Clamp(dw, 360, 520) : 420;
+        var h = ui.TryGetValue("height", out var hd) && hd is double dh && dh >= 300 ? (int)dh : 560;
         AppWindow.Resize(new SizeInt32(w, h));
         if (ui.TryGetValue("x", out var x) && x is double dx &&
             ui.TryGetValue("y", out var y) && y is double dy &&

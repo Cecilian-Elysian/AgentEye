@@ -2,7 +2,6 @@
     x:Class="AgentEye.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
     Title="AgentEye">
 
     <Window.SystemBackdrop>
@@ -20,34 +19,42 @@
                 Background="{ThemeResource AeGlassTintBrush}"
                 IsHitTestVisible="False" />
 
-        <!-- 自绘标题栏(延伸进标题栏区,拖拽区交给 SetTitleBar) -->
+        <!-- 自绘标题栏:左标题,右图标按钮组(拖拽区交给 SetTitleBar) -->
         <Grid x:Name="AppTitleBar" Background="Transparent">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
                 <Ellipse Width="12" Height="12" Margin="0,0,8,0"
                          Fill="{ThemeResource AccentFillColorDefaultBrush}" />
                 <TextBlock x:Name="AppTitle" Text="AgentEye" VerticalAlignment="Center" />
             </StackPanel>
+
+            <StackPanel x:Name="HeaderButtons" Orientation="Horizontal"
+                        VerticalAlignment="Center" HorizontalAlignment="Right">
+                <Button x:Name="BtnBack" Style="{StaticResource AeIconButtonStyle}"
+                        Click="BtnBack_Click" Visibility="Collapsed"
+                        ToolTipService.ToolTip="返回总览">
+                    <FontIcon FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                              FontSize="14" Glyph="&#xE72B;" />
+                </Button>
+                <Button x:Name="BtnPause" Style="{StaticResource AeIconButtonStyle}"
+                        Click="BtnPause_Click" ToolTipService.ToolTip="暂停轮询">
+                    <FontIcon x:Name="PauseIcon"
+                              FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                              FontSize="14" Glyph="&#xE769;" />
+                </Button>
+                <Button x:Name="BtnRefresh" Style="{StaticResource AeIconButtonStyle}"
+                        Click="BtnRefresh_Click" ToolTipService.ToolTip="立即刷新">
+                    <FontIcon FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                              FontSize="14" Glyph="&#xE72C;" />
+                </Button>
+                <Button x:Name="BtnSettings" Style="{StaticResource AeIconButtonStyle}"
+                        Click="BtnSettings_Click" ToolTipService.ToolTip="设置">
+                    <FontIcon FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                              FontSize="14" Glyph="&#xE713;" />
+                </Button>
+            </StackPanel>
         </Grid>
 
-        <muxc:NavigationView x:Name="Nav" Grid.Row="1"
-                             IsBackButtonVisible="Collapsed"
-                             IsSettingsVisible="False"
-                             PaneDisplayMode="Left"
-                             OpenPaneLength="160"
-                             SelectionChanged="Nav_SelectionChanged">
-            <muxc:NavigationView.MenuItems>
-                <muxc:NavigationViewItem Tag="overview" Content="总览" IsSelected="True">
-                    <muxc:NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE80F;" />
-                    </muxc:NavigationViewItem.Icon>
-                </muxc:NavigationViewItem>
-                <muxc:NavigationViewItem Tag="settings" Content="设置">
-                    <muxc:NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE713;" />
-                    </muxc:NavigationViewItem.Icon>
-                </muxc:NavigationViewItem>
-            </muxc:NavigationView.MenuItems>
-            <Grid x:Name="PageHost" />
-        </muxc:NavigationView>
+        <!-- 页面承载:总览/设置叠放,靠可见性切换 -->
+        <Grid x:Name="PageHost" Grid.Row="1" />
     </Grid>
 </Window>
