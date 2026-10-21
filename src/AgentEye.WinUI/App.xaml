@@ -17,8 +17,8 @@
                     <SolidColorBrush x:Key="AeTextPrimaryBrush" Color="#1A1A1A" />
                     <SolidColorBrush x:Key="AeTextSecondaryBrush" Color="#5E5E5E" />
                     <SolidColorBrush x:Key="AeDividerBrush" Color="#E8E8E8" />
-                    <!-- Acrylic 底层跟系统主题,这层罩保证手选浅色时观感一致 -->
-                    <SolidColorBrush x:Key="AeGlassTintBrush" Color="#8CF2F2F2" />
+                    <!-- Acrylic 材质负责玻璃感,这里只留 10% 薄纱保文字可读 + 跨主题一致 -->
+                    <SolidColorBrush x:Key="AeGlassTintBrush" Color="#1AF2F2F2" />
                 </ResourceDictionary>
                 <!-- 深色令牌 -->
                 <ResourceDictionary x:Key="Dark">
@@ -28,7 +28,7 @@
                     <SolidColorBrush x:Key="AeTextPrimaryBrush" Color="#FFFFFF" />
                     <SolidColorBrush x:Key="AeTextSecondaryBrush" Color="#A0A0A0" />
                     <SolidColorBrush x:Key="AeDividerBrush" Color="#333333" />
-                    <SolidColorBrush x:Key="AeGlassTintBrush" Color="#8C000000" />
+                    <SolidColorBrush x:Key="AeGlassTintBrush" Color="#1F000000" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 
