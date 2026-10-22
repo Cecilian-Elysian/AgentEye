@@ -13,7 +13,7 @@ Windows 桌面多 Key AI 额度观察工具。UI 采用 Win11 Acrylic 紧凑毛�
 
 - `src/AgentEye.Core`:net8.0 纯逻辑,**零 UI 依赖**——config v2 读写、
   DPAPI 加解密、6 种 provider 适配器、缓存、阈值判定、更新检查
-  (`Update/`:版本比较、release 解析、下载解包、替换脚本生成)。只引
+  (`Update/`:版本比较、release 解析、下载校验、安装器拉起)。只引
   `System.Security.Cryptography.ProtectedData`。
 - `src/AgentEye.WinUI`:WinUI 3 壳——MainWindow(去导航紧凑单窗)、
   Pages(总览/设置)、Widget(小组件)、Tray(托盘)、Services(AeRes /
@@ -38,6 +38,22 @@ dotnet test tests\AgentEye.Core.Tests -v q --nologo      # 56 passed
   砍掉 83 种语言卫星资源。`RuntimeIdentifier` 必须无条件设 win-x64,
   否则框架依赖发布直接失败。
 - 要自包含版(换机即用,166 MB)得临时改回这两个属性——别长期并存两套。
+- 一键构建 `build.ps1`(项目根,模式对齐 key_note):publish → 剪 pdb →
+  `dist\`(便携目录)→ 体积报告 → Inno Setup 出 `installer\AgentEye_Setup.exe`
+  (lzma2 约 7.6 MB)。`build\`、`dist\`、`installer\` 全部 gitignore;
+  staging 是干净的,config 在 `~\.agenteye` 与安装目录无关,无需备份还原。
+- PS1 含中文**必须带 UTF-8 BOM**(PS5.1 无 BOM 按 GBK 读,中文全串烧)。
+
+## 安装器契约(AgentEye_Setup.iss)
+
+- `AppId=AgentEye` 显式写死——升级链依赖它稳定,改名即断链。
+- `DefaultDirName=E:\AgentEye` + `DisableDirPage=auto`(升级沿用旧目录)。
+- `PrivilegesRequired=lowest`,HKCU 注册表,无需管理员。
+- `CloseApplications=yes` + `RestartApplications=yes`:静默升级时安装器经
+  Restart Manager 关掉运行中的应用、装完自动重启——**应用内更新靠这一对**,
+  所以 UpdateService 拉起安装器后**不自己退出**(安装失败应用还活着)。
+- [Run] 项带 `skipifsilent`:静默安装(更新场景)不弹"启动应用",
+  重启交给 RestartApplications。
 
 
 ## 窗口尺寸契约
@@ -117,10 +133,11 @@ Acrylic/Mica,窗口退化为不透明底色——这是系统策略,别去代码
 - 状态存 `cache/update_state.json`(上次检查时间、忽略的版本)——
   **不要往 config 里塞更新的键**(config 与 Python 版同源,别破坏)。
 - 版本号只认 csproj 的 `<Version>`;发布格式约定见 `docs/RELEASE.md`。
-- 替换靠 `robocopy /MIR` 整目录覆盖(自包含产物是 496 文件的目录,
-  不是单个 exe),所以 zip 必须是完整 publish 目录。
-- 替换脚本写在 `%TEMP%`,不放安装目录(会被自己覆盖);脚本日志在
-  `apply.ps1.log`,排障先看它。
+- 更新资产是 **`AgentEye_Setup.exe`(Inno 安装器)**:下载 → sha256 校验 →
+  `/VERYSILENT` 拉起安装器,关进程/替换/重启全归它。旧的
+  zip→robocopy 替换脚本方案已删(`ExtractZip`/`DetectPayloadRoot` 不复存在)。
+- 安装目录不可写时下载前就拒绝(提示手动修复);排障看 Inno 的
+  `%TEMP%` Setup Log,不再有 apply.ps1.log。
 - `AGENTEYE_UPDATE_API` 可覆盖 API 基址(镜像/自建实例/本地联调)。
 - 更新是增强面:任何一步失败只落状态文案,不许把主流程带崩。
 

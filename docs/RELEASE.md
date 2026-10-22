@@ -1,20 +1,23 @@
 # 发布契约(自动更新用)
 
 应用的"检查更新"走 GitHub Releases。本文件规定发布时必须满足的格式,
-否则应用会提示"release 里没有 win-x64 安装包"或拒绝安装。
+否则应用会提示"release 里没有 setup.exe 安装包"或拒绝安装。
 
 - 仓库:`github.com/Cecilian-Elysian/AgentEye`(公开,应用用匿名 API 读取)
 - 应用侧实现:`src/AgentEye.Core/Update/`(检查/下载/校验)与
-  `src/AgentEye.WinUI/Services/UpdateService.cs`(编排/替换/重启)
+  `src/AgentEye.WinUI/Services/UpdateService.cs`(编排/拉起安装器)
+- 一键构建:`build.ps1`(项目根)→ `dist\`(便携目录)+ `installer\AgentEye_Setup.exe`
 
 ## 一、版本号
 
 版本号写在 `src/AgentEye.WinUI/AgentEye.WinUI.csproj`:
 
 ```xml
-<Version>2.0.0</Version>
-<FileVersion>2.0.0.0</FileVersion>
+<Version>1.0.0</Version>
+<FileVersion>1.0.0.0</FileVersion>
 ```
+
+`build.ps1` 从 csproj 读版本注入安装器(**csproj 是唯一真源**)。
 
 应用启动时读程序集的 `AssemblyInformationalVersion`(自动去掉 `+<sha>` 后缀),
 与 release 的 `tag_name`(去 `v` 前缀)比较。三段式语义化版本,支持
@@ -27,30 +30,36 @@
 release 至少要有一个资产,名字必须匹配:
 
 ```
-AgentEye-win-x64.zip          ← 精确名,优先选用
-AgentEye-<任意版本>-win-x64.zip   ← 也接受
+AgentEye_Setup.exe             ← 精确名,优先选用
+AgentEye-<任意版本>-Setup.exe   ← 也接受
 ```
 
-- 必须是 `.zip`,且名字里含 `win-x64.zip`
-- 其它架构(`win-arm64.zip`)、`.msix`、`.txt` 都会被忽略
+- 必须是 `.exe`(Inno Setup 安装器),且名字里含 `setup.exe`(不区分大小写)
+- `.zip`、`.msix`、`.msi`、`.txt` 都会被忽略
 
-## 三、zip 内容(关键)
+## 三、安装包内容
 
-zip 里装的是**完整的发布目录**,不是单个 exe。当前产物是**框架依赖**发布,
-41 个文件 / 约 36 MB(主体是 WinRT 投影 `Microsoft.Windows.SDK.NET.dll` 23.7 MB,
-属于 WinAppSDK 包的硬依赖,剔不掉)。
+`AgentEye_Setup.exe` 由 Inno Setup 6 打包(`AgentEye_Setup.iss`),里面是
+**完整的框架依赖发布目录**(运行时用系统装的 .NET 8 Desktop Runtime +
+Windows App Runtime 1.7)。lzma2/max 压缩后约 **7.6 MB**。
 
-打包方式:
+打包方式(两种等价,推荐第一种):
 
 ```powershell
-dotnet publish src\AgentEye.WinUI -c Release -o publish\AgentEye-win-x64
-Compress-Archive -Path publish\AgentEye-win-x64\* -DestinationPath AgentEye-win-x64.zip
+# 一键:publish → 剪 pdb → dist\ → 体积报告 → installer\AgentEye_Setup.exe
+powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
+
+# 只重编安装器(源目录默认 dist,可用 /DSrcDir 换)
+& "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" /DAppVer=1.0.0 /DSrcDir=dist AgentEye_Setup.iss
 ```
 
-zip 的根目录里必须能找到 `AgentEye.exe`:
-- 根目录直接放(推荐):`zip:AgentEye.exe` ✓
-- 套一层目录也可以:`zip:AgentEye-win-x64/AgentEye.exe` ✓(应用会自动下钻一层)
-- 套多层/找不到 exe:应用判定"安装包结构不符合预期",拒绝更新
+安装器行为(见 `AgentEye_Setup.iss`):
+
+- `PrivilegesRequired=lowest`,默认装 `E:\AgentEye`,首装显示目录页、升级沿用旧目录
+- 桌面快捷方式(默认勾)、开机自启 HKCU Run(默认不勾)
+- `CloseApplications=yes` + `RestartApplications=yes`:升级时经 Restart Manager
+  关掉运行中的应用,装完自动重启——**应用内静默更新靠的就是这一对**
+- 卸载入口:开始菜单 + 系统设置"应用"(HKCU Uninstall 注册表)
 
 **用户端前置依赖**(框架依赖发布的代价):目标机器需已安装
 .NET 8 Desktop Runtime 与 Windows App Runtime 1.7。WinAppSDK 自带
@@ -64,46 +73,41 @@ zip 的根目录里必须能找到 `AgentEye.exe`:
 1. release 资产的 `digest` 字段(形如 `sha256:abc...`,GitHub 会给新上传的资产带上)
 2. 都没有 → 跳过校验(仍可安装,但不校验完整性)
 
-若两者都没有,想要校验,可以在 release 里再传一个同名 `.sha256` 边车文件
-(内容是 64 位十六进制);**当前版本不读边车文件**,只有 `digest` 生效。
+## 五、更新行为(用户侧会发生什么)
 
-## 五、替换行为(用户侧会发生什么)
-
-1. 应用下载 zip 到 `%TEMP%\AgentEye\update\<版本>\`
+1. 应用下载 `AgentEye_Setup.exe` 到 `%TEMP%\AgentEye\update\<版本>\`
 2. 校验 sha256(有 `digest` 时)
-3. 解包并定位 payload 根
-4. 生成 `%TEMP%\AgentEye\update\<版本>\apply.ps1`,启动它(隐藏窗口)
-5. 应用退出 → 脚本 `robocopy /MIR` 整目录覆盖安装目录(顺带清掉旧版本残留文件)
-6. 脚本拉起新版本
+3. 拉起安装器:`AgentEye_Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+   /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS`
+4. 安装器经 Restart Manager 关掉运行中的应用 → 覆盖安装 → 自动重启新版
 
 约束:
 
-- **安装目录必须可写**。装在 `Program Files` 下不可写 → 应用会明确提示
-  "安装目录不可写",请改用浏览器下载后手动替换(不做 UAC 提权)。
-- 替换的是**整个目录**,所以 zip 必须是完整发布目录,否则会把旧文件清掉。
-- 失败可查:脚本把每一步写进同目录的 `apply.ps1.log`。
+- **安装目录必须可写**。不可写时应用会在下载前就拒绝,提示手动修复。
+- 本进程不主动退出——安装器万一失败,应用还活着,可以重试或手装。
+- 排障:Inno 安装器自身的日志在 `%TEMP%`(Setup Log.*)。
+
 ## 六、发布步骤
 
 ```powershell
 # 1. 改版本号
-#    src\AgentEye.WinUI\AgentEye.WinUI.csproj → <Version>2.1.0</Version>
-# 2. 跑测试与构建
+#    src\AgentEye.WinUI\AgentEye.WinUI.csproj → <Version>1.1.0</Version>
+# 2. 一键构建(产物:dist\ + installer\AgentEye_Setup.exe)
 dotnet test tests\AgentEye.Core.Tests
-dotnet build src\AgentEye.WinUI -c Release
-# 3. 打包(见第三节)
-# 4. 提交 + 打 tag + 推送
-git add -A; git commit -m "release: v2.1.0"
-git tag -a v2.1.0 -m "v2.1.0"
+powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
+# 3. 提交 + 打 tag + 推送
+git add -A; git commit -m "release: v1.1.0"
+git tag -a v1.1.0 -m "v1.1.0"
 git push origin main --tags
-# 5. 建 release(网页或 gh CLI)
-gh release create v2.1.0 AgentEye-win-x64.zip --title "AgentEye 2.1.0" --notes "更新说明"
+# 4. 建 release(网页或 gh CLI),资产传 installer\AgentEye_Setup.exe
+gh release create v1.1.0 installer\AgentEye_Setup.exe --title "AgentEye 1.1.0" --notes "更新说明"
 ```
 
 注意:`gh` 需要先 `gh auth login`;release 建好后应用才能查到这个版本。
 
 ## 七、已验证的更新链路
 
-本地用假 GitHub API(返回 `releases/latest` + zip)端到端验证过:
-检查 → 提示新版本 → 下载 → sha256 校验 → 解包 → 定位 payload →
-生成脚本 → 应用退出 → robocopy 整目录替换 → 拉起新版本。
-替换用的是整目录镜像(`/MIR`),旧版本残留文件会被清掉。
+- 静默安装:`AgentEye_Setup.exe /VERYSILENT …` 装进 E:\AgentEye,
+  版本/卸载注册表/桌面入口全部就位,冒烟通过。
+- 检查→下载→校验→拉起安装器的链路与旧 zip 方案共用同一套
+  CheckAsync/DownloadAsync,检查与下载部分沿用既有端到端验证。

@@ -56,8 +56,8 @@ public static class UpdateChecker
     public const string Owner = "Cecilian-Elysian";
     public const string Repo = "AgentEye";
 
-    /// <summary>安装包资产名匹配模式:AgentEye-*-win-x64.zip。</summary>
-    public const string AssetNameHint = "win-x64.zip";
+    /// <summary>安装包资产名匹配模式:AgentEye_Setup.exe(Inno Setup 安装器)。</summary>
+    public const string AssetNameHint = "setup.exe";
 
     /// <summary>
     /// API 基址:默认官方 GitHub;环境变量 AGENTEYE_UPDATE_API 可指向
@@ -160,17 +160,17 @@ public static class UpdateChecker
         return hex.ToLowerInvariant();
     }
 
-    /// <summary>从资产里挑 win-x64 安装包(纯函数,可单测)。</summary>
+    /// <summary>从资产里挑安装器(纯函数,可单测)。</summary>
     public static UpdateAsset? SelectAsset(IReadOnlyList<UpdateAsset> assets)
     {
         UpdateAsset? best = null;
         foreach (var a in assets)
         {
             var name = a.Name.ToLowerInvariant();
-            if (!name.EndsWith(".zip", StringComparison.Ordinal)) continue;
+            if (!name.EndsWith(".exe", StringComparison.Ordinal)) continue;
             if (!name.Contains(AssetNameHint, StringComparison.Ordinal)) continue;
-            // 优先精确名 AgentEye-win-x64.zip
-            if (name == "agenteye-win-x64.zip") return a;
+            // 优先精确名 AgentEye_Setup.exe
+            if (name == "agenteye_setup.exe") return a;
             best ??= a;
         }
         return best;

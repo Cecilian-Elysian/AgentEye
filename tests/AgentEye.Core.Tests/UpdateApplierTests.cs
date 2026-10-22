@@ -28,41 +28,26 @@ public class UpdateApplierTests : IDisposable
     }
 
     [Fact]
-    public void QuotePs_Escapes_Single_Quote()
+    public void SilentInstallArgs_Has_Quiet_And_Restart_Flags()
     {
-        Assert.Equal("'abc'", UpdateApplier.QuotePs("abc"));
-        Assert.Equal("'a''b'", UpdateApplier.QuotePs("a'b"));
+        // 静默 + 不弹框;关掉运行中的应用并自动重启是整条链的关键
+        Assert.Contains("/VERYSILENT", UpdateApplier.SilentInstallArgs);
+        Assert.Contains("/SUPPRESSMSGBOXES", UpdateApplier.SilentInstallArgs);
+        Assert.Contains("/CLOSEAPPLICATIONS", UpdateApplier.SilentInstallArgs);
+        Assert.Contains("/RESTARTAPPLICATIONS", UpdateApplier.SilentInstallArgs);
     }
 
     [Fact]
-    public void BuildApplyScript_Contains_Key_Steps()
+    public void BuildSilentInstallCommand_Quotes_Path_And_Appends_Args()
     {
-        var script = UpdateApplier.BuildApplyScript(
-            1234, @"C:\tmp\src", @"C:\Program Files\AgentEye",
-            @"C:\Program Files\AgentEye\AgentEye.exe", @"C:\tmp\apply.ps1");
-        Assert.Contains("param(", script);
-        Assert.Contains("Wait-Process -Id $TargetPid", script);
-        Assert.Contains("robocopy.exe $Src $Dst /MIR", script);
-        Assert.Contains("Start-Process -FilePath $Exe", script);
-        // 失败要能查:脚本写日志 + 记 robocopy 退出码 + 失败重试
-        Assert.Contains("Log ", script);
-        Assert.Contains("robocopy try=$i exit=$rc", script);
-        Assert.Contains("robocopy.exe not found", script);
-    }
-
-    [Fact]
-    public void BuildLaunchCommand_Passes_All_Args()
-    {
-        var cmd = UpdateApplier.BuildLaunchCommand(
-            @"C:\tmp\apply.ps1", 4321, @"C:\tmp\src", @"C:\dst", @"C:\dst\AgentEye.exe");
-        Assert.Contains("-NoProfile", cmd);
-        Assert.Contains("-ExecutionPolicy Bypass", cmd);
-        Assert.Contains("-WindowStyle Hidden", cmd);
-        Assert.Contains("-File \"C:\\tmp\\apply.ps1\"", cmd);
-        Assert.Contains("-TargetPid 4321", cmd);
-        Assert.Contains("-Src \"C:\\tmp\\src\"", cmd);
-        Assert.Contains("-Dst \"C:\\dst\"", cmd);
-        Assert.Contains("-Exe \"C:\\dst\\AgentEye.exe\"", cmd);
+        var cmd = UpdateApplier.BuildSilentInstallCommand(
+            @"C:\Users\me\AppData\Local\Temp\AgentEye\update\1.1.0\AgentEye_Setup.exe");
+        Assert.StartsWith("\"", cmd);
+        Assert.Contains("\" ", cmd);
+        Assert.EndsWith(UpdateApplier.SilentInstallArgs, cmd);
+        // 路径带空格也必须整体被引号包住
+        var spaced = UpdateApplier.BuildSilentInstallCommand(@"C:\Prog Files\AgentEye_Setup.exe");
+        Assert.Contains("\"C:\\Prog Files\\AgentEye_Setup.exe\"", spaced);
     }
 
     [Fact]

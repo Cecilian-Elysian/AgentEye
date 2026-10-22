@@ -26,7 +26,9 @@ public sealed class UpdateState
 }
 
 /// <summary>
-/// 更新编排:检查(静默/手动)→ 下载 → 校验 → 解包 → 生成替换脚本 → 退出应用。
+/// 更新编排:检查(静默/手动)→ 下载 AgentEye_Setup.exe → 校验 → 静默安装。
+/// 安装器负责关掉本进程(Restart Manager)、替换文件并自动重启;
+/// 本进程不主动退出——安装失败时应用还活着,用户可重试或手装。
 /// 任何一步失败都只落到状态文案里,绝不把主流程带崩(增强面契约)。
 /// </summary>
 public sealed class UpdateService
@@ -164,8 +166,8 @@ public sealed class UpdateService
     }
 
     /// <summary>
-    /// 下载并安装更新:下载 → 校验 → 解包 → 生成替换脚本 → 启动脚本 → 退出应用。
-    /// 返回 null 表示成功(应用即将退出),否则是错误文案。
+    /// 下载并安装更新:下载 → 校验 → 拉起安装器静默安装。
+    /// 返回 null 表示安装器已启动(接下来由它关掉并重启本应用),否则是错误文案。
     /// </summary>
     public async Task<string?> DownloadAndApplyAsync(
         IProgress<int>? progress = null, CancellationToken ct = default)
@@ -173,16 +175,14 @@ public sealed class UpdateService
         var release = _result?.Release;
         if (release is null) return "尚未检查到新版本";
         var asset = UpdateChecker.SelectAsset(release.Assets);
-        if (asset is null) return "release 里没有可用的 win-x64 安装包";
+        if (asset is null) return "release 里没有可用的 AgentEye_Setup.exe 安装包";
 
         var installDir = AppContext.BaseDirectory.TrimEnd('\\');
-        var exePath = Path.Combine(installDir, "AgentEye.exe");
         if (!UpdateApplier.IsDirectoryWritable(installDir))
-            return $"安装目录不可写({installDir}),请改用浏览器下载后手动替换";
+            return $"安装目录不可写({installDir}),请重新运行安装器手动修复";
 
         var workDir = UpdateApplier.WorkDir(Path.GetTempPath(), release.VersionText);
-        var zipPath = Path.Combine(workDir, asset.Name);
-        var extractDir = Path.Combine(workDir, "payload");
+        var setupPath = Path.Combine(workDir, asset.Name);
 
         try
         {
@@ -195,13 +195,13 @@ public sealed class UpdateService
                 Message = $"正在下载 {asset.Name}…",
             });
 
-            await UpdateDownloader.DownloadAsync(asset.Url, zipPath, new Progress<long>(n =>
+            await UpdateDownloader.DownloadAsync(asset.Url, setupPath, new Progress<long>(n =>
             {
                 if (asset.Size > 0)
                     progress?.Report((int)Math.Clamp(n * 100 / asset.Size, 0, 99));
             }), ct);
 
-            if (!UpdateDownloader.VerifySha256(zipPath, asset.Sha256))
+            if (!UpdateDownloader.VerifySha256(setupPath, asset.Sha256))
                 return "安装包校验失败(sha256 不匹配),已放弃更新";
 
             Publish(new UpdateState
@@ -210,40 +210,13 @@ public sealed class UpdateService
                 LatestVersion = release.VersionText,
                 ReleaseUrl = release.HtmlUrl,
                 Busy = true,
-                Progress = 99,
-                Message = "正在解包…",
-            });
-            UpdateDownloader.ExtractZip(zipPath, extractDir);
-            var payloadRoot = UpdateDownloader.DetectPayloadRoot(extractDir);
-            if (payloadRoot is null)
-                return "安装包结构不符合预期(找不到 AgentEye.exe)";
-
-            var scriptPath = Path.Combine(workDir, "apply.ps1");
-            File.WriteAllText(scriptPath, UpdateApplier.BuildApplyScript(
-                Environment.ProcessId, payloadRoot, installDir, exePath, scriptPath),
-                new System.Text.UTF8Encoding(false));
-
-            var cmd = UpdateApplier.BuildLaunchCommand(
-                scriptPath, Environment.ProcessId, payloadRoot, installDir, exePath);
-            var psi = new ProcessStartInfo("powershell.exe", cmd)
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            Process.Start(psi);
-
-            // 脚本在等本进程退出,这里主动退出,让它接手替换
-            Publish(new UpdateState
-            {
-                HasUpdate = true,
-                LatestVersion = release.VersionText,
-                ReleaseUrl = release.HtmlUrl,
-                Busy = true,
                 Progress = 100,
-                Message = "正在更新,应用将自动重启…",
+                Message = "正在启动安装器,应用将被关闭并自动重启…",
             });
-            await Task.Delay(400);
-            Application.Current.Exit();
+            Process.Start(new ProcessStartInfo(setupPath, UpdateApplier.SilentInstallArgs)
+            {
+                UseShellExecute = true,
+            });
             return null;
         }
         catch (OperationCanceledException)

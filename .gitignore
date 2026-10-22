@@ -6,7 +6,10 @@ obj/
 AppPackages/
 artifacts/
 TestResults/
-release/
+build/
+dist/
+installer/
+*.exe
 .idea/
 *.swp
 

@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-10-22 — dist/installer 形态对齐 key_note + 更新改静默安装(feat/winui-acrylic)
+
+### 变更
+
+- 一键构建 `build.ps1`:publish → 剪 pdb → **`dist\`**(便携目录)→ 体积报告 →
+  Inno Setup 出 **`installer\AgentEye_Setup.exe`**(lzma2 约 7.6 MB),
+  `build\`/`dist\`/`installer\` 全部 gitignore;删掉旧的 `release\` 约定
+- 新增 `AgentEye_Setup.iss`:AppId=AgentEye 显式写死、装 `E:\AgentEye`、
+  `PrivilegesRequired=lowest`、桌面快捷方式 + 可选开机自启(HKCU)、
+  `CloseApplications=yes` + `RestartApplications=yes`(静默升级自动关旧进程、装完自动重启)
+- **应用内更新改静默安装**:GitHub Release 资产从 zip 换成 `AgentEye_Setup.exe`;
+  下载 → sha256 校验 → `/VERYSILENT` 拉起安装器;应用不再自己退出,
+  关进程/替换/重启全归安装器(安装失败应用还活着)
+- Core:`UpdateDownloader` 删掉 `ExtractZip`/`DetectPayloadRoot`;
+  `UpdateApplier` 的 robocopy 脚本生成换成安装器命令行;
+  `UpdateChecker` 资产匹配 `*.zip` → `*.exe`(精确名 `AgentEye_Setup.exe` 优先)
+- 静默安装端到端验收:装进 `E:\AgentEye`(1.0.0.0、卸载注册表、冒烟通过);
+  测试基线 105/105
+
 ## 2026-10-22 — 发布瘦身:框架依赖 + 裁语言包(feat/winui-acrylic)
 
 ### 变更

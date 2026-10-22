@@ -20,7 +20,7 @@ public class UpdateCheckerTests
           "prerelease": false,
           "published_at": "2026-10-22T10:00:00Z",
           "assets": [
-            {"name": "AgentEye-win-x64.zip", "browser_download_url": "https://x/a.zip",
+            {"name": "AgentEye_Setup.exe", "browser_download_url": "https://x/AgentEye_Setup.exe",
              "size": 123, "digest": "sha256:AAAA"},
             {"name": "sha256sums.txt", "browser_download_url": "https://x/s.txt", "size": 10}
           ]
@@ -63,10 +63,10 @@ public class UpdateCheckerTests
     {
         var assets = new List<UpdateAsset>
         {
-            new("AgentEye-2.1.0-win-x64.zip", "https://x/a.zip", 1, null),
-            new("AgentEye-win-x64.zip", "https://x/b.zip", 1, null),
+            new("AgentEye-2.1.0-Setup.exe", "https://x/a.exe", 1, null),
+            new("AgentEye_Setup.exe", "https://x/b.exe", 1, null),
         };
-        Assert.Equal("https://x/b.zip", UpdateChecker.SelectAsset(assets)!.Url);
+        Assert.Equal("https://x/b.exe", UpdateChecker.SelectAsset(assets)!.Url);
     }
 
     [Fact]
@@ -74,18 +74,18 @@ public class UpdateCheckerTests
     {
         var assets = new List<UpdateAsset>
         {
-            new("AgentEye-2.1.0-win-x64.zip", "https://x/a.zip", 1, null),
+            new("AgentEye-2.1.0-Setup.exe", "https://x/a.exe", 1, null),
         };
-        Assert.Equal("https://x/a.zip", UpdateChecker.SelectAsset(assets)!.Url);
+        Assert.Equal("https://x/a.exe", UpdateChecker.SelectAsset(assets)!.Url);
     }
 
     [Fact]
-    public void SelectAsset_Skips_NonZip_And_Other_Arch()
+    public void SelectAsset_Skips_NonExe_And_Other_Arch()
     {
         var assets = new List<UpdateAsset>
         {
-            new("AgentEye-win-x64.msix", "https://x/a.msix", 1, null),
-            new("AgentEye-win-arm64.zip", "https://x/b.zip", 1, null),
+            new("AgentEye-win-x64.zip", "https://x/a.zip", 1, null),
+            new("AgentEye_Setup.msi", "https://x/b.msi", 1, null),
             new("notes.txt", "https://x/c.txt", 1, null),
         };
         Assert.Null(UpdateChecker.SelectAsset(assets));
@@ -132,6 +132,6 @@ public class UpdateCheckerTests
     private static ReleaseInfo MakeRelease(string tag, bool withAsset) => new(
         tag, tag, "https://x", "", false, null,
         withAsset
-            ? new List<UpdateAsset> { new("AgentEye-win-x64.zip", "https://x/a.zip", 1, null) }
+            ? new List<UpdateAsset> { new("AgentEye_Setup.exe", "https://x/a.exe", 1, null) }
             : new List<UpdateAsset>());
 }

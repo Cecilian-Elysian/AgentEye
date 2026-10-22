@@ -1,12 +1,12 @@
-using System.IO.Compression;
 using System.Security.Cryptography;
 using AgentEye.Core.Providers;
 
 namespace AgentEye.Core.Update;
 
 /// <summary>
-/// 安装包下载与落地:流式下载(带进度)→ sha256 校验 → 解压 →
-/// 定位 payload 根目录(zip 内可能只有一层顶层目录)。
+/// 安装包下载与落地:流式下载(带进度)→ sha256 校验。
+/// 下载产物是 Inno Setup 安装器(AgentEye_Setup.exe),装与重启由它负责,
+/// 这里不再解包(zip 相关逻辑随 robocopy 方案一起废弃)。
 /// </summary>
 public static class UpdateDownloader
 {
@@ -55,37 +55,5 @@ public static class UpdateDownloader
         var actual = ComputeSha256(file);
         return string.Equals(actual, expectedHex.Trim().ToLowerInvariant(),
             StringComparison.Ordinal);
-    }
-
-    /// <summary>解压到目标目录(先清空)。</summary>
-    public static void ExtractZip(string zipFile, string destDir)
-    {
-        if (Directory.Exists(destDir))
-        {
-            foreach (var f in Directory.EnumerateFiles(destDir, "*", SearchOption.AllDirectories))
-                try { File.Delete(f); } catch (IOException) { }
-            foreach (var d in Directory.EnumerateDirectories(destDir))
-                try { Directory.Delete(d, true); } catch (IOException) { }
-        }
-        Directory.CreateDirectory(destDir);
-        ZipFile.ExtractToDirectory(zipFile, destDir, overwriteFiles: true);
-    }
-
-    /// <summary>
-    /// 定位 payload 根:根下有 exe 就用根;否则若只有唯一一层目录则下钻。
-    /// 找不到返回 null(资产不合法)。
-    /// </summary>
-    public static string? DetectPayloadRoot(string extractedDir, string requiredFile = "AgentEye.exe")
-    {
-        if (File.Exists(Path.Combine(extractedDir, requiredFile)))
-            return extractedDir;
-        var dirs = Directory.GetDirectories(extractedDir);
-        if (dirs.Length == 1)
-        {
-            var inner = dirs[0];
-            if (File.Exists(Path.Combine(inner, requiredFile)))
-                return inner;
-        }
-        return null;
     }
 }

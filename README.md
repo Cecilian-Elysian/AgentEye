@@ -39,10 +39,9 @@ dotnet test tests\AgentEye.Core.Tests
 
 ## 安装
 
-已发布安装到 `E:\AgentEye\`(框架依赖,41 个文件 / 约 36 MB),并建好快捷方式:
-
-- 桌面:`AgentEye`
-- 开始菜单:`AgentEye`
+运行 `installer\AgentEye_Setup.exe`(Inno Setup 安装器,lzma2 压缩约 7.6 MB),
+默认装到 `E:\AgentEye`,可选桌面快捷方式与开机自启,自带卸载入口
+(开始菜单 / 系统设置"应用")。当前本机已装好。
 
 **运行库前置**(装到别的机器时需要):
 
@@ -50,10 +49,11 @@ dotnet test tests\AgentEye.Core.Tests
 - Windows App Runtime 1.7(本机 ✓)
 
 配置与缓存仍在 `~\.agenteye\`(与安装位置无关,重装不丢配置)。
-自己重新发布:
+自己构建:
 
 ```powershell
-dotnet publish src\AgentEye.WinUI -c Release -o E:\AgentEye
+# 一键:publish → 剪 pdb → dist\(便携目录)→ installer\AgentEye_Setup.exe
+powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1
 ```
 
 ## 更新
@@ -61,8 +61,9 @@ dotnet publish src\AgentEye.WinUI -c Release -o E:\AgentEye
 - 更新源:GitHub Releases(`github.com/Cecilian-Elysian/AgentEye`)
 - 启动时后台静默检查一次(同一自然日只查一次),有新版弹 toast 提示
 - 设置页「关于」区可随时手动「检查更新」,发现新版可「下载并更新」:
-  应用内下载 → sha256 校验 → 解包 → 退出 → 脚本整目录替换 → 自动重启
-- 安装目录不可写(如装在 Program Files)时,会提示改用浏览器下载后手动替换
+  应用内下载安装器 → sha256 校验 → `/VERYSILENT` 静默安装
+  → 安装器经 Restart Manager 关掉旧进程、覆盖安装、自动重启新版
+- 安装目录不可写时,应用会在下载前就拒绝并提示手动修复
 - 发布格式约定见 `docs\RELEASE.md`
 
 ## 文件结构
