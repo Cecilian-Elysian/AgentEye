@@ -6,6 +6,7 @@ obj/
 AppPackages/
 artifacts/
 TestResults/
+release/
 .idea/
 *.swp
 
