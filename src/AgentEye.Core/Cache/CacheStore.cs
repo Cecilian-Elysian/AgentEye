@@ -41,6 +41,7 @@ public sealed class CacheStore
     private string ModelsPath => Path.Combine(_dir, "models.json");
     private string ProbeLogPath => Path.Combine(_dir, "probe.jsonl");
     private string AlertStatePath => Path.Combine(_dir, "alert_state.json");
+    private string UpdateStatePath => Path.Combine(_dir, "update_state.json");
 
     private void Ensure()
     {
@@ -364,5 +365,52 @@ public sealed class CacheStore
             output[name] = (level, ts);
         }
         return output;
+    }
+
+    // ------------------------------------------------------------------
+    // 更新检查状态(节流 + 忽略版本)
+    // ------------------------------------------------------------------
+
+    /// <summary>上次检查更新的时间戳(Unix 秒);没查过返回 null。</summary>
+    public double? LoadUpdateLastCheck()
+    {
+        Ensure();
+        var data = LoadJson(UpdateStatePath);
+        if (data is null || !data.TryGetValue("last_check", out var v)) return null;
+        return v is double d ? d : null;
+    }
+
+    /// <summary>记录上次检查时间(用于"每天最多查一次"的节流)。</summary>
+    public void SaveUpdateLastCheck(double ts)
+    {
+        Ensure();
+        lock (_lock)
+        {
+            var data = LoadJson(UpdateStatePath) ?? new Dictionary<string, object?>();
+            data["last_check"] = ts;
+            SaveJson(UpdateStatePath, data);
+        }
+    }
+
+    /// <summary>用户选择忽略的版本(不再提示);null = 不忽略任何版本。</summary>
+    public string? LoadUpdateIgnoredVersion()
+    {
+        Ensure();
+        var data = LoadJson(UpdateStatePath);
+        if (data is null || !data.TryGetValue("ignored_version", out var v)) return null;
+        return v is string s && s.Length > 0 ? s : null;
+    }
+
+    /// <summary>记录被忽略的版本(下次同版本不再提示)。</summary>
+    public void SaveUpdateIgnoredVersion(string? version)
+    {
+        Ensure();
+        lock (_lock)
+        {
+            var data = LoadJson(UpdateStatePath) ?? new Dictionary<string, object?>();
+            if (string.IsNullOrEmpty(version)) data.Remove("ignored_version");
+            else data["ignored_version"] = version;
+            SaveJson(UpdateStatePath, data);
+        }
     }
 }

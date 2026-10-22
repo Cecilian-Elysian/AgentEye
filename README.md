@@ -37,6 +37,15 @@ dotnet test tests\AgentEye.Core.Tests
 56 个测试覆盖配置层(v2 schema、DPAPI、v1 迁移、损坏隔离)与 provider 层
 (探测、6 种适配器、中转站、缓存、告警状态)。
 
+## 更新
+
+- 更新源:GitHub Releases(`github.com/Cecilian-Elysian/AgentEye`)
+- 启动时后台静默检查一次(同一自然日只查一次),有新版弹 toast 提示
+- 设置页「关于」区可随时手动「检查更新」,发现新版可「下载并更新」:
+  应用内下载 → sha256 校验 → 解包 → 退出 → 脚本整目录替换 → 自动重启
+- 安装目录不可写(如装在 Program Files)时,会提示改用浏览器下载后手动替换
+- 发布格式约定见 `docs\RELEASE.md`
+
 ## 文件结构
 
 ```
@@ -54,7 +63,8 @@ tests\AgentEye.Core.Tests
 ```
 
 工程契约(资源取用、XAML 坑、config 兼容)见 `AGENTS.md`;改造执行计划
-收录于 `docs\PLAN-winui-acrylic.md`;变更记录见 `CHANGELOG.md`。
+收录于 `docs\PLAN-winui-acrylic.md`;发布格式约定见 `docs\RELEASE.md`;
+变更记录见 `CHANGELOG.md`。
 
 ## 与 Python 版的已知差异
 

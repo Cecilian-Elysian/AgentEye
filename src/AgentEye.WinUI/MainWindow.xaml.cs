@@ -77,6 +77,17 @@ public sealed partial class MainWindow : Window
                 0, 0, AppWindow.TitleBar.RightInset / Root.XamlRoot.RasterizationScale, 0);
         }
         catch { /* XamlRoot 未就绪等:忽略,按钮区右侧留白稍宽无碍 */ }
+
+        // 启动静默检查更新(同一自然日只查一次);发现新版弹一次 toast
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (!_app.Update.ShouldCheckNow()) return;
+                await _app.Update.CheckAsync(silent: true);
+            }
+            catch { /* 增强面:静默失败 */ }
+        });
     }
 
     public void ApplyTheme(string choice)

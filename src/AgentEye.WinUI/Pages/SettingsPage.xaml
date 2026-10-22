@@ -94,6 +94,24 @@
                     </StackPanel>
                 </StackPanel>
             </StackPanel>
+            <!-- 关于 / 更新 -->
+            <StackPanel Spacing="8">
+                <TextBlock Text="关于" Style="{StaticResource AeSectionTitleStyle}" />
+                <TextBlock x:Name="VersionText" FontSize="12"
+                           Foreground="{ThemeResource AeTextSecondaryBrush}" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="BtnCheckUpdate" Content="检查更新"
+                            Click="BtnCheckUpdate_Click" />
+                    <Button x:Name="BtnDownloadUpdate" Content="下载并更新"
+                            Visibility="Collapsed" Click="BtnDownloadUpdate_Click" />
+                    <Button x:Name="BtnIgnoreUpdate" Content="忽略此版本"
+                            Visibility="Collapsed" Click="BtnIgnoreUpdate_Click" />
+                </StackPanel>
+                <TextBlock x:Name="UpdateStatusText" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{ThemeResource AeTextSecondaryBrush}" />
+                <ProgressBar x:Name="UpdateProgress" Height="3" Visibility="Collapsed"
+                             CornerRadius="1.5" />
+            </StackPanel>
         </StackPanel>
     </ScrollViewer>
 </UserControl>

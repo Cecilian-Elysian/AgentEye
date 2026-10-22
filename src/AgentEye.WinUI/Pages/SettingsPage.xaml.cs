@@ -1,5 +1,6 @@
 using AgentEye.Core.Config;
 using AgentEye.Core.Providers;
+using AgentEye.Core.Update;
 using AgentEye.WinUI.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -30,6 +31,8 @@ public sealed partial class SettingsPage : UserControl
         ReloadList();
         app.ConfigSaved += ReloadList;
         Unloaded += (_, _) => app.ConfigSaved -= ReloadList;
+        app.Update.StateChanged += OnUpdateState;
+        Unloaded += (_, _) => app.Update.StateChanged -= OnUpdateState;
     }
 
     /// <summary>每次切到设置页:表单收回列表态,通用区回显最新 cfg。</summary>
@@ -58,6 +61,8 @@ public sealed partial class SettingsPage : UserControl
             WarnPctBox.Value = alert.TryGetValue("warn_pct", out var w) ? Convert.ToDouble(w) : 30;
             CriticalYuanBox.Value = alert.TryGetValue("critical_amount_yuan", out var c)
                 ? Convert.ToDouble(c) : 5.0;
+            VersionText.Text = $"当前版本 v{UpdateService.CurrentVersion}" +
+                               $"(更新源 github.com/{UpdateChecker.Owner}/{UpdateChecker.Repo})";
         }
         finally
         {
@@ -94,6 +99,57 @@ public sealed partial class SettingsPage : UserControl
         alert["warn_pct"] = (int)Math.Clamp(WarnPctBox.Value, 0, 100);
         alert["critical_amount_yuan"] = Math.Max(0, CriticalYuanBox.Value);
         _app.TrySaveCfg();
+    }
+
+    // ------------------------------------------------------------------
+    // 关于 / 更新
+    // ------------------------------------------------------------------
+
+    private void OnUpdateState(UpdateState state)
+    {
+        // 检查/下载都可能从后台线程回调,统一回 UI 线程刷新
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            UpdateStatusText.Text = state.Message;
+            BtnCheckUpdate.IsEnabled = !state.Busy;
+            UpdateProgress.Visibility = state.Busy && state.Progress > 0
+                ? Visibility.Visible : Visibility.Collapsed;
+            UpdateProgress.Value = state.Progress;
+            BtnDownloadUpdate.Visibility = state.HasUpdate ? Visibility.Visible : Visibility.Collapsed;
+            BtnIgnoreUpdate.Visibility = state.HasUpdate ? Visibility.Visible : Visibility.Collapsed;
+        });
+    }
+
+    private async void BtnCheckUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        UpdateStatusText.Text = "正在检查更新…";
+        await _app.Update.CheckAsync(silent: false);
+    }
+
+    private async void BtnDownloadUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        BtnDownloadUpdate.IsEnabled = false;
+        var progress = new Progress<int>(p =>
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                UpdateProgress.Visibility = Visibility.Visible;
+                UpdateProgress.Value = p;
+                UpdateStatusText.Text = $"正在下载并更新… {p}%";
+            });
+        });
+        var error = await _app.Update.DownloadAndApplyAsync(progress);
+        if (error is not null)
+        {
+            UpdateStatusText.Text = error;
+            BtnDownloadUpdate.IsEnabled = true;
+        }
+    }
+
+    private async void BtnIgnoreUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        _app.Update.IgnoreCurrentVersion();
+        await _app.Update.CheckAsync(silent: true);
     }
 
     // ------------------------------------------------------------------

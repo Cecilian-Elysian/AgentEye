@@ -12,7 +12,8 @@ Windows 桌面多 Key AI 额度观察工具。UI 采用 Win11 Acrylic 紧凑毛�
 ## 三层结构
 
 - `src/AgentEye.Core`:net8.0 纯逻辑,**零 UI 依赖**——config v2 读写、
-  DPAPI 加解密、6 种 provider 适配器、缓存、阈值判定。只引
+  DPAPI 加解密、6 种 provider 适配器、缓存、阈值判定、更新检查
+  (`Update/`:版本比较、release 解析、下载解包、替换脚本生成)。只引
   `System.Security.Cryptography.ProtectedData`。
 - `src/AgentEye.WinUI`:WinUI 3 壳——MainWindow(去导航紧凑单窗)、
   Pages(总览/设置)、Widget(小组件)、Tray(托盘)、Services(AeRes /
@@ -86,6 +87,20 @@ dotnet test tests\AgentEye.Core.Tests -v q --nologo      # 56 passed
 `DesktopAcrylicBackdrop` 在老系统上可能抛异常,赋值处必须 try/catch。
 系统「透明效果」关闭时(注册表 `EnableTransparency=0`)Windows 一律不渲染
 Acrylic/Mica,窗口退化为不透明底色——这是系统策略,别去代码里绕。
+
+## 更新机制
+
+- 更新源是 GitHub Releases;检查逻辑在 `Core/Update/`,编排在
+  `WinUI/Services/UpdateService.cs`。
+- 状态存 `cache/update_state.json`(上次检查时间、忽略的版本)——
+  **不要往 config 里塞更新的键**(config 与 Python 版同源,别破坏)。
+- 版本号只认 csproj 的 `<Version>`;发布格式约定见 `docs/RELEASE.md`。
+- 替换靠 `robocopy /MIR` 整目录覆盖(自包含产物是 496 文件的目录,
+  不是单个 exe),所以 zip 必须是完整 publish 目录。
+- 替换脚本写在 `%TEMP%`,不放安装目录(会被自己覆盖);脚本日志在
+  `apply.ps1.log`,排障先看它。
+- `AGENTEYE_UPDATE_API` 可覆盖 API 基址(镜像/自建实例/本地联调)。
+- 更新是增强面:任何一步失败只落状态文案,不许把主流程带崩。
 
 ## 退出码
 

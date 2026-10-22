@@ -22,6 +22,7 @@ public sealed class AppServices
 
     public PollerService Poller { get; }
     public NotifyService Notify { get; }
+    public UpdateService Update { get; }
 
     /// <summary>每轮刷新完成后触发(UI 线程)。</summary>
     public event Action? ResultsChanged;
@@ -45,6 +46,7 @@ public sealed class AppServices
         }
         Poller = new PollerService(this);
         Notify = new NotifyService();
+        Update = new UpdateService(this);
     }
 
     public bool TrySaveCfg()

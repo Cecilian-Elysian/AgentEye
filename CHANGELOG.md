@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-10-22 — GitHub 自动更新(feat/winui-acrylic)
+
+### 新增
+
+- 自动更新通道:更新源为 GitHub Releases(`Cecilian-Elysian/AgentEye`)。
+  - 启动时静默检查一次(同一自然日只查一次,状态存 `cache/update_state.json`)
+  - 设置页「关于」区:当前版本 / 检查更新 / 下载并更新 / 忽略此版本
+  - 下载 → sha256 校验(GitHub 资产 `digest`)→ 解包 → 退出应用 →
+    PowerShell 辅助脚本 `robocopy /MIR` 整目录替换 → 自动拉起新版本
+  - 安装目录不可写时降级为提示手动替换(不做 UAC 提权)
+- Core 新增 `Update/`(版本比较、release 解析、下载解包、替换脚本生成),
+  配套 53 个 xUnit 用例,测试总数 56 → 109
+- `docs/RELEASE.md`:发布契约(tag 命名、资产名、zip 内容、校验、发布步骤)
+
+### 变更
+
+- 应用版本号写入 csproj(`<Version>2.0.0</Version>`),与 release tag 比对
+- `AGENTEYE_UPDATE_API` 环境变量可覆盖 API 基址(镜像/自建实例/本地联调)
+
 ## 2026-10-21 — WinUI 3 紧凑毛玻璃面板(feat/winui-acrylic)
 
 本分支起 AgentEye 转为 WinUI 3 实现,Python/Tkinter 原版只保留在
