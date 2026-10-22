@@ -30,6 +30,16 @@ dotnet test tests\AgentEye.Core.Tests -v q --nologo      # 56 passed
 
 冒烟:启动 exe 7 秒未退出。改 XAML 后必须重构建确认 pass1 没有静默崩。
 
+## 发布形态
+
+- **框架依赖**(csproj 里 `SelfContained=false` + `WindowsAppSDKSelfContained=false`):
+  产物 41 文件 / 36 MB,运行时用系统装的 .NET 8 Desktop Runtime +
+  Windows App Runtime 1.7。`SatelliteResourceLanguages=zh-Hans;en`
+  砍掉 83 种语言卫星资源。`RuntimeIdentifier` 必须无条件设 win-x64,
+  否则框架依赖发布直接失败。
+- 要自包含版(换机即用,166 MB)得临时改回这两个属性——别长期并存两套。
+
+
 ## 窗口尺寸契约
 
 - 主尺寸 **420×560**(用户确认的紧凑面板),写在 `MainWindow.xaml.cs`

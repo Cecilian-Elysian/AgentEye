@@ -36,13 +36,14 @@ AgentEye-<任意版本>-win-x64.zip   ← 也接受
 
 ## 三、zip 内容(关键)
 
-zip 里装的是**完整的自包含发布目录**,不是单个 exe。当前产物是
-496 个文件 / 约 166 MB(含 .NET 运行时、WindowsAppRuntime、WinUI)。
+zip 里装的是**完整的发布目录**,不是单个 exe。当前产物是**框架依赖**发布,
+41 个文件 / 约 36 MB(主体是 WinRT 投影 `Microsoft.Windows.SDK.NET.dll` 23.7 MB,
+属于 WinAppSDK 包的硬依赖,剔不掉)。
 
 打包方式:
 
 ```powershell
-dotnet publish src\AgentEye.WinUI -c Release -r win-x64 --self-contained true -o publish\AgentEye-win-x64
+dotnet publish src\AgentEye.WinUI -c Release -o publish\AgentEye-win-x64
 Compress-Archive -Path publish\AgentEye-win-x64\* -DestinationPath AgentEye-win-x64.zip
 ```
 
@@ -50,6 +51,11 @@ zip 的根目录里必须能找到 `AgentEye.exe`:
 - 根目录直接放(推荐):`zip:AgentEye.exe` ✓
 - 套一层目录也可以:`zip:AgentEye-win-x64/AgentEye.exe` ✓(应用会自动下钻一层)
 - 套多层/找不到 exe:应用判定"安装包结构不符合预期",拒绝更新
+
+**用户端前置依赖**(框架依赖发布的代价):目标机器需已安装
+.NET 8 Desktop Runtime 与 Windows App Runtime 1.7。WinAppSDK 自带
+`WindowsAppRuntime.Bootstrap.dll`,缺 WinApp Runtime 时它能自动补装,
+但缺 .NET 8 需要用户手动装。
 
 ## 四、校验(可选但建议)
 
@@ -76,7 +82,6 @@ zip 的根目录里必须能找到 `AgentEye.exe`:
   "安装目录不可写",请改用浏览器下载后手动替换(不做 UAC 提权)。
 - 替换的是**整个目录**,所以 zip 必须是完整发布目录,否则会把旧文件清掉。
 - 失败可查:脚本把每一步写进同目录的 `apply.ps1.log`。
-
 ## 六、发布步骤
 
 ```powershell

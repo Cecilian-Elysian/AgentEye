@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-22 — 发布瘦身:框架依赖 + 裁语言包(feat/winui-acrylic)
+
+### 变更
+
+- 发布形态改为**框架依赖**(`SelfContained=false` + `WindowsAppSDKSelfContained=false`):
+  产物从 491 文件 / 166 MB 降到 **41 文件 / 36 MB**,83 种语言卫星资源
+  (`SatelliteResourceLanguages=zh-Hans;en`)一并砍掉
+- `RuntimeIdentifier` 改为无条件 `win-x64`(框架依赖发布必须带 RID)
+- 用户端前置依赖:.NET 8 Desktop Runtime + Windows App Runtime 1.7
+  (本机均已安装);`E:\AgentEye` 已用瘦版替换,旧自包含版备份在 `E:\AgentEye.full`
+
 ## 2026-10-22 — 多尺寸自适应 + 安装到 E 盘(feat/winui-acrylic)
 
 ### 新增

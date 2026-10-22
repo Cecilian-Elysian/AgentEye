@@ -39,17 +39,21 @@ dotnet test tests\AgentEye.Core.Tests
 
 ## 安装
 
-已发布安装到 `E:\AgentEye\`(自包含整目录,约 166 MB / 491 个文件,含
-.NET 运行时与 Windows App Runtime,不需要另装运行库),并建好快捷方式:
+已发布安装到 `E:\AgentEye\`(框架依赖,41 个文件 / 约 36 MB),并建好快捷方式:
 
 - 桌面:`AgentEye`
 - 开始菜单:`AgentEye`
+
+**运行库前置**(装到别的机器时需要):
+
+- .NET 8 Desktop Runtime(本机 8.0.11 ✓)
+- Windows App Runtime 1.7(本机 ✓)
 
 配置与缓存仍在 `~\.agenteye\`(与安装位置无关,重装不丢配置)。
 自己重新发布:
 
 ```powershell
-dotnet publish src\AgentEye.WinUI -c Release -r win-x64 --self-contained true -o E:\AgentEye
+dotnet publish src\AgentEye.WinUI -c Release -o E:\AgentEye
 ```
 
 ## 更新

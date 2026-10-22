@@ -12,12 +12,17 @@
     <FileVersion>2.0.0.0</FileVersion>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x64</Platforms>
-    <RuntimeIdentifier Condition="'$(Platform)' == 'x64'">win-x64</RuntimeIdentifier>
+    <!-- 框架依赖发布必须带 RID(原来只在 Platform==x64 时生效,默认 AnyCPU 会发布失败) -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <UseWinUI>true</UseWinUI>
     <EnableMsixTooling>true</EnableMsixTooling>
     <WindowsPackageType>None</WindowsPackageType>
-    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
-    <SelfContained>true</SelfContained>
+    <!-- 瘦身:运行时用系统装的(.NET 8 Desktop Runtime + Windows App Runtime 1.7),
+         产物从 491 文件/166MB 降到 ~30 文件/10MB;换机器需先装这两个运行时 -->
+    <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
+    <SelfContained>false</SelfContained>
+    <!-- 只留简体中文 + 英文,砍掉 83 种语言的卫星资源 -->
+    <SatelliteResourceLanguages>zh-Hans;en</SatelliteResourceLanguages>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
