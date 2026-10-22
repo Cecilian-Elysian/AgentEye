@@ -112,6 +112,9 @@ public sealed partial class SettingsPage : UserControl
         {
             UpdateStatusText.Text = state.Message;
             BtnCheckUpdate.IsEnabled = !state.Busy;
+            // 有新版时只留「下载并更新 / 忽略此版本」,窄窗口也放得下
+            BtnCheckUpdate.Visibility = state.HasUpdate
+                ? Visibility.Collapsed : Visibility.Visible;
             UpdateProgress.Visibility = state.Busy && state.Progress > 0
                 ? Visibility.Visible : Visibility.Collapsed;
             UpdateProgress.Value = state.Progress;

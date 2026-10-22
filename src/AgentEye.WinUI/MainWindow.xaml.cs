@@ -4,6 +4,7 @@ using AgentEye.WinUI.Tray;
 using AgentEye.WinUI.Widget;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using System.Runtime.InteropServices;
 using WinRT.Interop;
 using Windows.Graphics;
 
@@ -15,6 +16,67 @@ namespace AgentEye;
 /// </summary>
 public sealed partial class MainWindow : Window
 {
+    /// <summary>
+    /// 窗口尺寸契约(物理像素,与 config 存的 ui.width/height 同源):
+    /// 420×560 是主尺寸(用户确认的紧凑面板),其余尺寸靠自适应布局兜住,
+    /// 最小/最大用来防止拖到布局撑不住的极端尺寸。
+    /// </summary>
+    private const int DefaultWidth = 420, DefaultHeight = 560;
+    private const int MinWidth = 320, MinHeight = 400;
+    private const int MaxWidth = 800, MaxHeight = 1200;
+
+    private const uint WM_GETMINMAXINFO = 0x0024;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X, Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MINMAXINFO
+    {
+        public POINT ptReserved;
+        public POINT ptMaxSize;
+        public POINT ptMaxPosition;
+        public POINT ptMinTrackSize;
+        public POINT ptMaxTrackSize;
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate nint SUBCLASSPROC(
+        nint hWnd, uint uMsg, nint wParam, nint lParam, nuint uIdSubclass, nint dwSubclassParam);
+
+    [DllImport("comctl32.dll")]
+    private static extern bool SetWindowSubclass(
+        nint hWnd, SUBCLASSPROC pfnSubclass, nuint uIdSubclass, nuint dwSubclassParam);
+
+    [DllImport("comctl32.dll")]
+    private static extern bool RemoveWindowSubclass(
+        nint hWnd, SUBCLASSPROC pfnSubclass, nuint uIdSubclass);
+
+    [DllImport("comctl32.dll")]
+    private static extern nint DefSubclassProc(
+        nint hWnd, uint uMsg, nint wParam, nint lParam);
+
+    // 委托必须一直存活,否则被 GC 回收后子类化失效
+    private static readonly SUBCLASSPROC SizeConstraintCallback = SizeConstraintProc;
+    private bool _subclassed;
+
+    private static nint SizeConstraintProc(
+        nint hWnd, uint msg, nint wParam, nint lParam, nuint id, nint param)
+    {
+        if (msg == WM_GETMINMAXINFO && lParam != nint.Zero)
+        {
+            try
+            {
+                var mmi = Marshal.PtrToStructure<MINMAXINFO>(lParam);
+                mmi.ptMinTrackSize = new POINT { X = MinWidth, Y = MinHeight };
+                mmi.ptMaxTrackSize = new POINT { X = MaxWidth, Y = MaxHeight };
+                Marshal.StructureToPtr(mmi, lParam, false);
+            }
+            catch { /* 结构写失败:保持系统默认限制 */ }
+        }
+        return DefSubclassProc(hWnd, msg, wParam, lParam);
+    }
+
     private readonly AppServices _app = new();
     private OverviewPage? _overview;
     private SettingsPage? _settings;
@@ -31,10 +93,25 @@ public sealed partial class MainWindow : Window
         // 主题:加载即应用(ui.theme)
         ApplyTheme(_app.ThemeChoice);
 
+        // 限制拖拽范围(最小/最大),避免拖到布局撑不住的极端尺寸
+        ApplySizeConstraints();
+
         // 几何恢复(ui.x/y/width/height)
         RestoreGeometry();
 
         Closed += (_, _) => OnClosed();
+    }
+
+    /// <summary>给窗口挂 WM_GETMINMAXINFO 子类,限制最小/最大尺寸。</summary>
+    private void ApplySizeConstraints()
+    {
+        try
+        {
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            if (hwnd == nint.Zero) return;
+            _subclassed = SetWindowSubclass(hwnd, SizeConstraintCallback, 1, 0);
+        }
+        catch { /* comctl32 不可用:退化成无限制,布局本身已自适应 */ }
     }
 
     private void Root_Loaded(object sender, RoutedEventArgs e)
@@ -213,11 +290,13 @@ public sealed partial class MainWindow : Window
     private void RestoreGeometry()
     {
         var ui = _app.UiDict();
-        // 紧凑面板:420×560 兜底,宽度夹 [360,520]
+        // 主尺寸 420×560;恢复时夹到允许范围(其它尺寸都自适应)
         var wv = AsNum(ui.TryGetValue("width", out var wRaw) ? wRaw : null);
-        var w = wv is double dw && dw >= 360 ? (int)Math.Clamp(dw, 360, 520) : 420;
+        var w = wv is double dw && dw >= MinWidth
+            ? (int)Math.Clamp(dw, MinWidth, MaxWidth) : DefaultWidth;
         var hv = AsNum(ui.TryGetValue("height", out var hRaw) ? hRaw : null);
-        var h = hv is double dh && dh >= 300 ? (int)dh : 560;
+        var h = hv is double dh && dh >= MinHeight
+            ? (int)Math.Clamp(dh, MinHeight, MaxHeight) : DefaultHeight;
         AppWindow.Resize(new SizeInt32(w, h));
         var xv = AsNum(ui.TryGetValue("x", out var xRaw) ? xRaw : null);
         var yv = AsNum(ui.TryGetValue("y", out var yRaw) ? yRaw : null);
@@ -233,6 +312,18 @@ public sealed partial class MainWindow : Window
     {
         if (_closed) return;
         _closed = true;
+        // 卸掉窗口子类(句柄即将失效)
+        try
+        {
+            if (_subclassed)
+            {
+                var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                if (hwnd != nint.Zero)
+                    RemoveWindowSubclass(hwnd, SizeConstraintCallback, 1);
+                _subclassed = false;
+            }
+        }
+        catch { /* 静默 */ }
         // 几何持久化(AppWindow 物理像素直接存,恢复时同源)
         try
         {

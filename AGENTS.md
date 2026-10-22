@@ -30,6 +30,18 @@ dotnet test tests\AgentEye.Core.Tests -v q --nologo      # 56 passed
 
 冒烟:启动 exe 7 秒未退出。改 XAML 后必须重构建确认 pass1 没有静默崩。
 
+## 窗口尺寸契约
+
+- 主尺寸 **420×560**(用户确认的紧凑面板),写在 `MainWindow.xaml.cs`
+  的 `DefaultWidth/DefaultHeight`;物理像素,与 config 的
+  `ui.width/ui.height` 同源(存的是物理像素,恢复时同源)。
+- 允许范围 320×400 ~ 800×1200,靠 `WM_GETMINMAXINFO` 子类
+  (`SetWindowSubclass`)约束;越界拖拽会被系统夹回。
+- **其它尺寸必须自适应**:横向排列容易撑破的地方一律用 Grid
+  (标签列 `*` + 控件列 `Auto`),不要用固定宽度的横排 StackPanel;
+  文字加 `TextTrimming`,页脚/标题用两列 Grid 防重叠。
+- 窄窗口下头部按钮区优先(标题裁剪),设置页靠 ScrollViewer 滚动。
+
 ## 主题资源契约
 
 - 代码里取主题画刷**必须走 `Services/AeRes.Brush(el, key)` /

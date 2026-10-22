@@ -37,6 +37,21 @@ dotnet test tests\AgentEye.Core.Tests
 56 个测试覆盖配置层(v2 schema、DPAPI、v1 迁移、损坏隔离)与 provider 层
 (探测、6 种适配器、中转站、缓存、告警状态)。
 
+## 安装
+
+已发布安装到 `E:\AgentEye\`(自包含整目录,约 166 MB / 491 个文件,含
+.NET 运行时与 Windows App Runtime,不需要另装运行库),并建好快捷方式:
+
+- 桌面:`AgentEye`
+- 开始菜单:`AgentEye`
+
+配置与缓存仍在 `~\.agenteye\`(与安装位置无关,重装不丢配置)。
+自己重新发布:
+
+```powershell
+dotnet publish src\AgentEye.WinUI -c Release -r win-x64 --self-contained true -o E:\AgentEye
+```
+
 ## 更新
 
 - 更新源:GitHub Releases(`github.com/Cecilian-Elysian/AgentEye`)

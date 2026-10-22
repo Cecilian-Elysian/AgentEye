@@ -25,28 +25,47 @@
                                   OnContent="告警开" OffContent="告警关"
                                   Toggled="AlertToggle_Changed" />
                 </StackPanel>
-                <!-- 告警阈值拆两行:单行在 404px 内容宽里放不下(元记为红会被裁) -->
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <TextBlock Text="剩余百分比 ≤" VerticalAlignment="Center" />
-                    <muxc:NumberBox x:Name="WarnPctBox" MinWidth="90" Minimum="0"
-                                    Maximum="100" SpinButtonPlacementMode="Compact"
-                                    ValueChanged="AlertNum_Changed" />
-                    <TextBlock Text="% 记为黄" VerticalAlignment="Center" />
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <TextBlock Text="剩余额度 ≤" VerticalAlignment="Center" />
-                    <muxc:NumberBox x:Name="CriticalYuanBox" MinWidth="90" Minimum="0"
+                <!-- 告警阈值:标签列自适应(窄窗口时换行),数值框与后缀固定 -->
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="剩余百分比 ≤"
+                               VerticalAlignment="Center" TextWrapping="Wrap" />
+                    <muxc:NumberBox x:Name="WarnPctBox" Grid.Column="1" MinWidth="90"
+                                    Minimum="0" Maximum="100"
                                     SpinButtonPlacementMode="Compact"
                                     ValueChanged="AlertNum_Changed" />
-                    <TextBlock Text="元 记为红" VerticalAlignment="Center" />
-                </StackPanel>
+                    <TextBlock Grid.Column="2" Text="% 记为黄" VerticalAlignment="Center" />
+                </Grid>
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="剩余额度 ≤"
+                               VerticalAlignment="Center" TextWrapping="Wrap" />
+                    <muxc:NumberBox x:Name="CriticalYuanBox" Grid.Column="1" MinWidth="90"
+                                    Minimum="0" SpinButtonPlacementMode="Compact"
+                                    ValueChanged="AlertNum_Changed" />
+                    <TextBlock Grid.Column="2" Text="元 记为红" VerticalAlignment="Center" />
+                </Grid>
             </StackPanel>
 
             <!-- API 管理 -->
             <StackPanel x:Name="ManageRoot" Spacing="10">
-                <Grid>
-                    <TextBlock Text="API 管理" Style="{StaticResource AeSectionTitleStyle}" />
-                    <Button Content="添加 Key" HorizontalAlignment="Right"
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="API 管理"
+                               Style="{StaticResource AeSectionTitleStyle}"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <Button Grid.Column="1" Content="添加 Key"
                             Click="BtnAdd_Click" />
                 </Grid>
 
@@ -66,7 +85,8 @@
                             Visibility="Collapsed">
                     <Grid ColumnSpacing="10" RowSpacing="8">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="140" />
+                            <!-- 标签列按内容自适应,窄窗口时输入框仍有空间 -->
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>

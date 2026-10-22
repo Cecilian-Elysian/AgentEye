@@ -127,6 +127,9 @@ public sealed partial class OverviewPage : UserControl
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Foreground = TextBrush(),
             VerticalAlignment = VerticalAlignment.Center,
+            // 名字可能被挤窄,裁剪而不是撑破布局
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            MaxWidth = 180,
         });
         if (row.Paused)
             nameRow.Children.Add(new TextBlock

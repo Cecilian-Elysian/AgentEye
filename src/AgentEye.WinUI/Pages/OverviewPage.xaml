@@ -26,14 +26,17 @@
             </StackPanel>
         </Grid>
 
-        <!-- 页脚:刷新时间 + 数量 -->
-        <Grid Grid.Row="2">
-            <TextBlock x:Name="FooterUpdated" FontSize="11"
+        <!-- 页脚:刷新时间 + 数量(两列自适应,窄窗口不打架) -->
+        <Grid Grid.Row="2" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="FooterUpdated" Grid.Column="0" FontSize="11"
                        Foreground="{ThemeResource AeTextSecondaryBrush}"
-                       Text="尚未刷新" />
-            <TextBlock x:Name="FooterCount" FontSize="11"
-                       Foreground="{ThemeResource AeTextSecondaryBrush}"
-                       HorizontalAlignment="Right" />
+                       Text="尚未刷新" TextTrimming="CharacterEllipsis" />
+            <TextBlock x:Name="FooterCount" Grid.Column="1" FontSize="11"
+                       Foreground="{ThemeResource AeTextSecondaryBrush}" />
         </Grid>
     </Grid>
 </UserControl>
